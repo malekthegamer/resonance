@@ -53,15 +53,18 @@ test('the preload bridge is narrow — no raw ipcRenderer or Node reaches the re
 })
 
 test('a typed IPC round-trip returns from the main process', async () => {
-  await page.getByTestId('ping').click()
-  await expect(page.getByTestId('pong')).toContainText('pong')
+  // Asserted through the bridge rather than a debug button: slice 0's
+  // diagnostic card was replaced by the real library UI, but the capability it
+  // demonstrated still has to hold.
+  const reply = await page.evaluate(() => window.resonance.ping())
+  expect(reply).toBe('pong')
 })
 
 test('node:sqlite is live inside Electron and reports a version', async () => {
   // This is the §A7 replacement for better-sqlite3. If it ever regresses the app
   // has no database at all, so the smoke test covers it from slice 0 onward.
-  const shown = await page.getByTestId('v-sqlite').textContent()
-  expect(shown).toMatch(/^\d+\.\d+\.\d+$/)
+  const info = await page.evaluate(() => window.resonance.getAppInfo())
+  expect(info.sqlite).toMatch(/^\d+\.\d+\.\d+$/)
 })
 
 test('the fixed identity gradient is present and dark is the default theme', async () => {

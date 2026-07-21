@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { AppInfo, DbInfo, ScanProgress, Settings, Track } from '@shared/types'
 import type { LibraryStats } from '../main/ipc/library'
@@ -31,6 +31,19 @@ const api = {
         ipcRenderer.removeListener(IPC.LIB_SCAN_PROGRESS, listener)
       }
     }
+  },
+
+  /**
+   * Resolves dropped File objects to real filesystem paths.
+   *
+   * Electron removed `File.path` in v32, so this is the supported route. It must
+   * happen in the preload — `webUtils` is not available to the sandboxed
+   * renderer, which is the point: the renderer can only learn the path of a file
+   * the user themselves dropped onto the window.
+   */
+  files: {
+    getPaths: (files: File[]): string[] =>
+      files.map((f) => webUtils.getPathForFile(f)).filter(Boolean)
   },
 
   settings: {

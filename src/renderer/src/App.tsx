@@ -1,23 +1,46 @@
-import { useEffect, useState } from 'react'
-import type { AppInfo, Theme } from '@shared/types'
+import { useEffect, useMemo, useState } from 'react'
+import type { Theme } from '@shared/types'
 import { TitleBar } from './components/TitleBar'
-import { formatDuration } from './core/format'
+import { Sidebar } from './components/Sidebar'
+import { TopBar } from './components/TopBar'
+import { TrackTable } from './components/TrackTable'
+import { AlbumGrid, SimpleGrid } from './components/CardGrid'
+import { ScanBanner } from './components/ScanBanner'
+import {
+  albumKeyFor,
+  artistKeyFor,
+  genreKeyFor,
+  groupByAlbum,
+  groupByArtist,
+  groupByGenre,
+  recentlyAdded
+} from './core/grouping'
+import { sortTracks } from './core/sort'
+import { useLibrary } from './state/library'
 import styles from './App.module.css'
 
-/**
- * Slice 0 shell: proves the frameless chrome, the glass/aurora treatment, the
- * theme toggle, and a real typed round-trip through the preload bridge. The
- * library UI replaces the card body in slice 3.
- */
+const VIEW_TITLES: Record<string, string> = {
+  songs: 'Songs',
+  albums: 'Albums',
+  artists: 'Artists',
+  genres: 'Genres',
+  recent: 'Recently Added'
+}
+
 export default function App(): React.JSX.Element {
-  const [info, setInfo] = useState<AppInfo | null>(null)
   const [theme, setTheme] = useState<Theme>('dark')
-  const [pong, setPong] = useState<string>('—')
+  const [dragging, setDragging] = useState(false)
+
+  const {
+    tracks, view, focus, query, searchResults, sortKey, sortDir,
+    load, setFocus, setScan, scanPaths
+  } = useLibrary()
 
   useEffect(() => {
-    void window.resonance.getAppInfo().then(setInfo)
+    void load()
     void window.resonance.settings.getAll().then((s) => setTheme(s.theme))
-  }, [])
+    return window.resonance.library.onScanProgress(setScan)
+  }, [load, setScan])
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
@@ -29,66 +52,114 @@ export default function App(): React.JSX.Element {
     await window.resonance.settings.set('theme', next)
   }
 
-  async function doPing(): Promise<void> {
-    const started = performance.now()
-    const reply = await window.resonance.ping()
-    setPong(`${reply} in ${(performance.now() - started).toFixed(1)}ms`)
+  const albums = useMemo(() => groupByAlbum(tracks), [tracks])
+  const artists = useMemo(() => groupByArtist(tracks), [tracks])
+  const genres = useMemo(() => groupByGenre(tracks), [tracks])
+
+  // A search overrides the current view entirely; results are already ranked by
+  // FTS relevance, so column sorting is not applied to them.
+  const searching = searchResults !== null && query.trim().length > 0
+
+  const visibleTracks = useMemo(() => {
+    if (searching) return searchResults!
+    if (focus) {
+      // Keys come from grouping.ts rather than being recomputed here. They were
+      // duplicated once and the copies disagreed on trimming and on the
+      // "Unknown …" fallbacks, so every untagged album opened to an empty list.
+      const inFocus = tracks.filter((t) => {
+        if (focus.kind === 'album') return albumKeyFor(t) === focus.key
+        if (focus.kind === 'artist') return artistKeyFor(t) === focus.key
+        return genreKeyFor(t) === focus.key
+      })
+      return sortTracks(inFocus, focus.kind === 'album' ? 'trackNo' : sortKey, sortDir)
+    }
+    if (view === 'recent') return recentlyAdded(tracks)
+    return sortTracks(tracks, sortKey, sortDir)
+  }, [searching, searchResults, focus, tracks, view, sortKey, sortDir])
+
+  // Drag-and-drop accepts both files and folders (plan gap G1). Paths are
+  // resolved in the preload via webUtils, since File.path no longer exists.
+  async function onDrop(e: React.DragEvent): Promise<void> {
+    e.preventDefault()
+    setDragging(false)
+    const paths = window.resonance.files.getPaths(Array.from(e.dataTransfer.files))
+    if (paths.length) await scanPaths(paths)
   }
 
+  const showingGrid = !searching && !focus && view !== 'songs' && view !== 'recent'
+
+  const title = searching
+    ? `Search: “${query}”`
+    : focus
+      ? focus.label
+      : (VIEW_TITLES[view] ?? 'Library')
+
+  const subtitle = searching
+    ? `${visibleTracks.length} ${visibleTracks.length === 1 ? 'result' : 'results'}`
+    : focus
+      ? `${visibleTracks.length} ${visibleTracks.length === 1 ? 'track' : 'tracks'}`
+      : undefined
+
   return (
-    <div className={styles.shell}>
+    <div
+      className={styles.shell}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false)
+      }}
+      onDrop={(e) => void onDrop(e)}
+    >
       <TitleBar />
 
-      <main className={styles.body}>
-        <section className={styles.card}>
-          <p className={styles.kicker}>Slice 0 · scaffold &amp; spine</p>
-          <h1 className={styles.h1}>Resonance</h1>
-          <p className={styles.sub}>
-            Frameless glass chrome, the fixed blue→purple identity, and a typed preload
-            bridge. Everything below was read from the main process over IPC.
-          </p>
+      <div className={styles.body}>
+        <Sidebar />
 
-          <dl className={styles.rows}>
-            <div className={styles.row}>
-              <dt>Electron</dt>
-              <dd data-testid="v-electron">{info?.electron ?? '…'}</dd>
-            </div>
-            <div className={styles.row}>
-              <dt>Chromium</dt>
-              <dd>{info?.chrome ?? '…'}</dd>
-            </div>
-            <div className={styles.row}>
-              <dt>Node</dt>
-              <dd>{info?.node ?? '…'}</dd>
-            </div>
-            <div className={styles.row}>
-              <dt>SQLite (node:sqlite)</dt>
-              <dd
-                data-testid="v-sqlite"
-                className={info && info.sqlite ? styles.ok : styles.bad}
-              >
-                {info ? (info.sqlite ?? 'unavailable') : '…'}
-              </dd>
-            </div>
-            <div className={styles.row}>
-              <dt>Duration formatter</dt>
-              <dd data-testid="v-format">{formatDuration(3671)}</dd>
-            </div>
-          </dl>
+        <main className={styles.content}>
+          <TopBar
+            title={title}
+            subtitle={subtitle}
+            onBack={focus ? () => setFocus(null) : undefined}
+            theme={theme}
+            onToggleTheme={() => void toggleTheme()}
+          />
+          <ScanBanner />
 
-          <div className={styles.actions}>
-            <button className={styles.primary} onClick={doPing} data-testid="ping">
-              Ping main
-            </button>
-            <button className={styles.ghost} onClick={toggleTheme} data-testid="theme">
-              {theme === 'dark' ? 'Light theme' : 'Dark theme'}
-            </button>
-            <span className={styles.pong} data-testid="pong">
-              {pong}
-            </span>
+          {showingGrid ? (
+            view === 'albums' ? (
+              <AlbumGrid
+                albums={albums}
+                onOpen={(a) => setFocus({ kind: 'album', key: a.key, label: a.album })}
+              />
+            ) : view === 'artists' ? (
+              <SimpleGrid
+                groups={artists}
+                kind="artist"
+                onOpen={(g) => setFocus({ kind: 'artist', key: g.key, label: g.name })}
+              />
+            ) : (
+              <SimpleGrid
+                groups={genres}
+                kind="genre"
+                onOpen={(g) => setFocus({ kind: 'genre', key: g.key, label: g.name })}
+              />
+            )
+          ) : (
+            <TrackTable tracks={visibleTracks} showArt={!focus || focus.kind !== 'album'} />
+          )}
+        </main>
+      </div>
+
+      {dragging && (
+        <div className={styles.dropOverlay} data-testid="drop-overlay">
+          <div className={styles.dropCard}>
+            <p className={styles.dropTitle}>Drop to add</p>
+            <p className={styles.dropBody}>Files or folders — both work.</p>
           </div>
-        </section>
-      </main>
+        </div>
+      )}
     </div>
   )
 }

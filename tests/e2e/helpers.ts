@@ -9,12 +9,21 @@ import { _electron as electron, type ElectronApplication, type Page } from '@pla
  * undefined, and the failure looks like a crash in our own code rather than an
  * environment problem. It is stripped explicitly here.
  */
+/**
+ * Tests get their own userData directory.
+ *
+ * Without this they scan test fixtures into the real library, so the app the
+ * user opens is polluted with `tone-440-6db` and a 112 MB `large-tone` — and
+ * leftover state from a previous run makes the next run non-deterministic.
+ */
+export const TEST_USER_DATA = resolve(process.cwd(), 'test-results', 'userdata')
+
 export async function launchApp(): Promise<{ app: ElectronApplication; page: Page }> {
   const env = { ...process.env }
   delete env['ELECTRON_RUN_AS_NODE']
 
   const app = await electron.launch({
-    args: [resolve(process.cwd(), 'out/main/index.js')],
+    args: [resolve(process.cwd(), 'out/main/index.js'), `--user-data-dir=${TEST_USER_DATA}`],
     env: env as Record<string, string>
   })
 

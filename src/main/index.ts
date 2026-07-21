@@ -20,7 +20,13 @@ registerSchemes()
 // otherwise the library you build in dev is not the library the installed app
 // opens, and relocating it later orphans a real user's library.
 app.setName('Resonance')
-app.setPath('userData', join(app.getPath('appData'), 'Resonance'))
+
+// An explicit --user-data-dir must win. Unconditionally calling setPath here
+// silently overrode it, so the e2e suite scanned its fixtures into the real
+// library instead of an isolated one.
+if (!app.commandLine.getSwitchValue('user-data-dir')) {
+  app.setPath('userData', join(app.getPath('appData'), 'Resonance'))
+}
 
 // Only one Resonance. A second launch focuses the existing window instead of
 // opening a rival instance that would fight over the library DB and the tray.
