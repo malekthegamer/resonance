@@ -1,0 +1,117 @@
+/*
+ * Resonance design tokens.
+ *
+ * The blue→purple gradient is the FIXED brand identity (plan §A4). It is used
+ * for the player bar accents, the active/now-playing row, the progress fill,
+ * the play/pause button, EQ slider fills, and focus states. It is NEVER sampled
+ * from album artwork. Art-derived color is confined to --aurora-* below, which
+ * only ever tints a localized wash behind the Now Playing artwork.
+ */
+
+:root {
+  /* ---- Fixed identity ---- */
+  --accent-a: #4f7cff;
+  --accent-b: #9b5cff;
+  --accent-grad: linear-gradient(135deg, var(--accent-a) 0%, var(--accent-b) 100%);
+  --accent-grad-h: linear-gradient(90deg, var(--accent-a) 0%, var(--accent-b) 100%);
+  --accent-a-rgb: 79 124 255;
+  --accent-b-rgb: 155 92 255;
+
+  /* ---- Art-derived aurora (slice 6). Clamped; localized to Now Playing. ---- */
+  --aurora-1: rgb(var(--accent-a-rgb) / 0.35);
+  --aurora-2: rgb(var(--accent-b-rgb) / 0.35);
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-med: 220ms;
+  --dur-slow: 420ms;
+
+  /* ---- Shape ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+
+  --titlebar-h: 40px;
+  --playerbar-h: 92px;
+  --sidebar-w: 248px;
+
+  --font-ui:
+    'Segoe UI Variable Text', 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
+  --font-display:
+    'Segoe UI Variable Display', 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* ---------- Dark (default) ---------- */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-base: #0d0d14;
+  --bg-deep: #08080e;
+  --bg-raise: #14141f;
+
+  /* Glass panels: translucent fills that sit over the ambient gradient wash. */
+  --glass-bg: rgb(255 255 255 / 0.045);
+  --glass-bg-strong: rgb(255 255 255 / 0.075);
+  --glass-border: rgb(255 255 255 / 0.09);
+  --glass-border-strong: rgb(255 255 255 / 0.16);
+  --glass-blur: 22px;
+
+  --text-hi: #f2f3f8;
+  --text-mid: #a8adc0;
+  --text-lo: #6f748a;
+
+  --row-hover: rgb(255 255 255 / 0.05);
+  --row-active: rgb(var(--accent-a-rgb) / 0.14);
+
+  --shadow-lg: 0 24px 60px rgb(0 0 0 / 0.55);
+  --shadow-md: 0 10px 30px rgb(0 0 0 / 0.4);
+
+  /* Ambient wash painted behind everything; gives the glass something to blur. */
+  --ambient:
+    radial-gradient(1100px 700px at 12% -10%, rgb(var(--accent-a-rgb) / 0.2), transparent 60%),
+    radial-gradient(900px 620px at 92% 8%, rgb(var(--accent-b-rgb) / 0.18), transparent 62%),
+    radial-gradient(760px 560px at 62% 108%, rgb(var(--accent-b-rgb) / 0.12), transparent 60%);
+}
+
+/* ---------- Light ---------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-base: #f4f5fa;
+  --bg-deep: #e9ebf3;
+  --bg-raise: #ffffff;
+
+  --glass-bg: rgb(255 255 255 / 0.62);
+  --glass-bg-strong: rgb(255 255 255 / 0.8);
+  --glass-border: rgb(16 18 34 / 0.08);
+  --glass-border-strong: rgb(16 18 34 / 0.14);
+  --glass-blur: 20px;
+
+  --text-hi: #14162a;
+  --text-mid: #4d5270;
+  --text-lo: #7d8299;
+
+  --row-hover: rgb(16 18 34 / 0.045);
+  --row-active: rgb(var(--accent-a-rgb) / 0.12);
+
+  --shadow-lg: 0 24px 60px rgb(30 34 70 / 0.16);
+  --shadow-md: 0 10px 28px rgb(30 34 70 / 0.12);
+
+  --ambient:
+    radial-gradient(1100px 700px at 12% -10%, rgb(var(--accent-a-rgb) / 0.16), transparent 60%),
+    radial-gradient(900px 620px at 92% 8%, rgb(var(--accent-b-rgb) / 0.14), transparent 62%),
+    radial-gradient(760px 560px at 62% 108%, rgb(var(--accent-b-rgb) / 0.1), transparent 60%);
+}
+
+/* Respect users who ask for less motion; animations are decoration, not function. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-med: 1ms;
+    --dur-slow: 1ms;
+  }
+}

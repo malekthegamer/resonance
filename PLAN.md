@@ -1,0 +1,356 @@
+# Resonance — Build Plan
+
+> **Revision 3.** Rev 2 applied four review corrections plus one defect I found while applying them (§A2b, CORS/Web Audio silence). Rev 3 applies two more: window-state restore (§A5, a responsibility I dropped during the rev-2 rewrite) and a rigorous averaged FFT tripwire (§A6). GATE re-run at the bottom.
+>
+> This file is the source of truth. `PLAN.md` in the repo is created as the first task of slice 0 and mirrors it.
+
+## Context
+
+`e:\Resonance` is empty except for the build prompt. We are building **Resonance** from scratch: a production-quality Windows desktop music player — a modern reimagining of Windows Media Player, music only. Electron + React + TypeScript, real SQLite library, real Web Audio engine, shipped as an NSIS installer.
+
+This is not a prototype. Success is the spec's ten acceptance criteria, verified with evidence rather than asserted.
+
+### Decisions locked in the interview
+
+| Question | Decision |
+|---|---|
+| Build cadence | One autonomous run; I self-gate and run tests after **every** slice before starting the next |
+| Visual identity | **Glassy / aurora** — frosted panels, gradient glow behind album art |
+| Window chrome | **Frameless** with custom-drawn controls — Snap Layouts flyout knowingly forfeited (§A1) |
+| Visualizer | **In** (toggleable off) |
+| Live folder watching | **In** (chokidar) — beyond the original spec |
+| Crossfade | **In** — kept after I flagged that dropping it would break acceptance criterion #7 |
+| Smart playlists | **Out** — the one thing cut from the spec |
+| Testing | Vitest for pure logic + Playwright-Electron for smoke tests and real screenshots |
+
+### Environment (verified, not assumed)
+
+Node **v24.14.1**, npm **11.15.0**, git **2.53.0**, **Visual Studio Community 2022 with the C++ toolchain**, Python **3.12.0**. Test library: 55 MP3s in `C:\Users\malek\Music`, **being extended by you** with FLAC / M4A / OGG-Opus / WAV and one >100 MB file (§A3).
+
+---
+
+# Amendments (revision 2)
+
+## A1 — Window chrome: Snap Layouts forfeited, not "verified"
+
+**The original plan was wrong.** It listed Snap Layouts as a risk to be "verified against real screenshots." That verification is impossible: the Snap Layouts flyout is an OS hover interaction attached to the *native* maximize button. A frameless window has no native maximize button, and `-webkit-app-region: drag` does not restore it. No screenshot could have proven or disproven it.
+
+**Decision: keep the custom-drawn glass controls and accept the loss.** The chosen aesthetic depends on glass running edge-to-edge, and the practical cost is small.
+
+Compensating behaviors to implement, so window management still feels native:
+
+- **Double-click** the title-bar drag region → toggle maximize/restore.
+- **Drag to top edge** → maximize; **drag off** a maximized window → restore.
+- Keyboard snapping is unaffected and needs no work: **Win + Arrow** tiles the window, and **Win + Z** opens the Snap Layouts flyout directly. Only the *mouse-hover* path to that flyout is lost.
+
+The risk-register line is replaced with:
+
+> Snap Layouts hover flyout intentionally unsupported (custom chrome). Snapping remains available via Win+Arrow, Win+Z, double-click-maximize, and drag-snap — **verified by manual checklist, not by screenshot.**
+
+## A2 — Custom protocol: privileged flags, CSP, and CORS
+
+### A2a — Privileged registration and CSP (as directed)
+
+Both schemes are registered **before `app.whenReady()`** via `protocol.registerSchemesAsPrivileged`. Without `stream` and `supportFetchAPI`, range requests fail and seeking breaks on large files — silently.
+
+```ts
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'resonance-media', privileges: {
+      standard: true, secure: true, supportFetchAPI: true,
+      stream: true, bypassCSP: false, corsEnabled: true } },
+  { scheme: 'resonance-art', privileges: {
+      standard: true, secure: true, supportFetchAPI: true,
+      stream: true, bypassCSP: false, corsEnabled: true } },
+])
+```
+
+The renderer CSP must admit both, or audio and artwork fail silently under sandbox:
+
+```
+media-src 'self' resonance-media: ;
+img-src   'self' resonance-art: data: ;
+```
+
+Because `standard: true` makes these parse with http-like host/path semantics, the URL shapes are fixed and documented: **`resonance-media://track/<id>`** and **`resonance-art://art/<sha256>`**.
+
+**Security invariant, restated:** neither protocol ever accepts a filesystem path from the renderer. It receives only an opaque track ID or content hash, resolves it against the database in main, and refuses anything that does not resolve to a known library row. A compromised renderer cannot read arbitrary files.
+
+### A2b — CORS on the media scheme (defect I found while applying A2a)
+
+This is the same silent-failure class as A2a and it is worse, because it produces *no error at all*.
+
+The renderer page and `resonance-media://` are **different origins**. Per the Web Audio spec, a `MediaElementAudioSourceNode` built from a cross-origin media resource that has not been CORS-approved outputs **silence** — the element still reports playing, `currentTime` still advances, the UI looks perfectly healthy, and nothing reaches the speakers. Every automated check I planned for slice 4 would have passed while the app produced no sound.
+
+Three pieces are required together; any one missing reproduces the silence:
+
+1. `corsEnabled: true` in the privileged registration above.
+2. The protocol handler returns `Access-Control-Allow-Origin: *` on every media response.
+3. The `<audio>` decks set **`crossOrigin = 'anonymous'` before `src` is ever assigned.**
+
+Ordering matters in (3): setting `crossOrigin` after `src` does not retroactively un-taint the element.
+
+**Added to the slice-4 exit criterion:** an assertion that the analyser returns non-zero frequency data during playback. That is the automated tripwire for this bug — a silent-but-"playing" element yields an all-zero FFT, which distinguishes it from every other failure mode.
+
+## A3 — Format and range verification against real non-MP3 files
+
+The library is currently MP3-only, so the range-seek mitigation (aimed at large FLAC) and the spec's format matrix would otherwise go untested. You are adding FLAC, M4A/AAC, OGG/Opus, WAV, and one >100 MB file before the run.
+
+- **Slice 2 exit:** scan console output must show **at least one track of each required format** parsed and inserted, listed by format.
+- **Slice 4 exit:** byte-range seeking verified specifically against the **>100 MB file** — seek to ~90%, confirm playback resumes there rather than stalling or restarting. Each format loaded and played at least once.
+- **Reporting rule:** if a required format is absent from the scanned library at verification time, it is marked **UNVERIFIED** in the final report. I will not claim format or range support I did not exercise. WMA remains best-effort per spec.
+
+## A4 — Blue→purple locked as fixed brand identity
+
+The art-sampled aurora is a localized effect and must never become the app's color.
+
+**Fixed tokens in `styles/tokens.css`** (`--accent-grad: linear-gradient(#4f7cff → #9b5cff)`), never sampled from artwork, used for: player-bar accents, active/now-playing row highlight, progress-bar fill, play/pause button, EQ slider fills, and all focus states.
+
+**The art-sampled aurora is confined to a single localized wash behind the Now Playing album art.** Never the sidebar, never the player bar, never the global background. Its saturation and lightness are clamped so a vivid cover cannot overwhelm the frame.
+
+**Added to slice-6 exit:** screenshots with a **warm-toned cover** (red/orange art) and a **cool-toned cover**, both framed to include the player bar and controls, proving the identity gradient is unchanged in each.
+
+## A5 — Window state is part of session restore (regression I introduced)
+
+Rev 1's file map read `windows/main.ts — frameless window, state persistence`. When I rewrote that line in rev 2 to describe the §A1 chrome work, I overwrote the phrase and silently dropped the responsibility. The spec names it explicitly ("restore … theme, and **window state**"), so this was a real regression, not a wording change.
+
+**`src/main/windows/main.ts` owns window-state persistence**, restored to the file map. Concretely:
+
+- Persisted to `electron-store` on a debounced `resize` / `move` / `maximize` / `unmaximize`: `{ x, y, width, height, isMaximized }`.
+- Restored before first paint, with the window created hidden and shown on `ready-to-show`, so a restored window does not visibly jump from default bounds to saved bounds.
+- **Bounds are validated against currently connected displays** via `screen.getAllDisplays()`. If the saved rectangle no longer intersects any display — an unplugged second monitor, a resolution change — it falls back to centered default bounds. Without this check the window restores off-screen and the app appears not to launch at all.
+- If `isMaximized` was true, bounds are stored as the *restored* bounds and `maximize()` is called after show, so un-maximizing returns to a sensible size rather than a stale one.
+
+The mini-player's remembered position stays in slice 7 and is stored separately; the two windows do not share state.
+
+**Added to the slice-8 relaunch assertion:** window `x`, `y`, `width`, `height`, and `isMaximized` are compared before quit and after relaunch, alongside queue, track, position, volume, EQ, and theme.
+
+## A6 — The FFT silence tripwire must be averaged, not instantaneous
+
+A single `getByteFrequencyData` frame is not evidence. It can land in a genuinely quiet moment of a real track and read near-zero on healthy audio (false alarm), or catch a transient and read non-zero on a broken graph (false pass — the dangerous direction). Correcting this:
+
+**Measurement.** Sample the analyser across a **~500 ms window** (≈30 frames via `requestAnimationFrame`), take the mean bin magnitude per frame, then average those frame means. `fftSize = 2048`, `smoothingTimeConstant = 0` so frames are independent rather than pre-smoothed into each other.
+
+**Primary fixture — deterministic, no timestamp guesswork.** `tests/fixtures/tone-440-6db.wav`: 5 seconds of 440 Hz sine at −6 dBFS, generated by a checked-in script at test setup. Every 500 ms window is a known-loud passage, so there is no quiet-passage false alarm by construction, and the test does not depend on your library staying unchanged. Measured at **t = 1.000 s → 1.500 s**. Assertion: averaged mean magnitude **> 40** (0–255 scale); a −6 dBFS sine sits far above this, and the margin absorbs codec and device variation.
+
+**Negative control, in the same test.** With the deck paused, the identical 500 ms measurement must read **< 2**. Without this, the tripwire could pass for the wrong reason — a disconnected or misconfigured analyser can return non-zero garbage, and "non-zero" alone would not catch it. The test asserts the *difference* between playing and paused, which is what actually proves signal is reaching the analyser.
+
+**Secondary, real-world.** `Attack on Titan OP 1 Guren No Yumiya.mp3` — a dense, consistently loud rock mix. I will **not** guess a timestamp: at slice-4 setup I run an offline RMS scan of the decoded file, locate the highest-energy 500 ms window, and pin that measured offset into the test as a named constant with the measured dBFS recorded beside it. The value goes in the slice-4 report. Stating a timestamp now would be a guess dressed as a fact.
+
+## A7 — `better-sqlite3` → `node:sqlite` (forced deviation, taken during slice 0)
+
+**My rev-1 environment check was wrong, and it was wrong in the direction that matters.** I ran `vswhere -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64`, got a hit, and concluded "native rebuild has a working fallback path." That verified a *component was registered*, not that a build could actually run. It cannot: **`MSBuild.exe` does not exist anywhere on this machine** (`MSBuild\Current\Bin\` contains only `Roslyn`), and there is no .NET SDK. `better-sqlite3` failed to compile on the first `npm install`.
+
+Chain of diagnosis, for the record: two hypotheses tested and **disproved** before the real cause was found — that Git Bash was dropping `%ProgramFiles(x86)%` (it is not), and that the Bash sandbox was blocking node-gyp's PowerShell probe (PowerShell failed identically outside the sandbox). The actual cause is twofold: node-gyp's `getMSBuild` looks for the package `Microsoft.VisualStudio.VC.MSBuild.Base` while VS 17.14 registers it as `...VC.MSBuild.v170.Base`, so the package check misses and falls through to a hardcoded path — and that path is empty because MSBuild genuinely is not installed.
+
+**Taking the escape hatch this plan already named.** Verified by direct probe inside Electron 43.2.0 (`scripts/probe-sqlite.cjs`, kept in-tree as reproducible evidence): SQLite **3.53.1**, prepared statements, bulk transactions, named parameters, WAL mode, and **FTS5** all working.
+
+Consequences, stated plainly:
+
+- **This deviates from the spec's named stack.** `better-sqlite3` is gone; the DB layer targets `node:sqlite`'s `DatabaseSync`, whose API is close enough that the query layer is nearly unchanged.
+- **The app now has zero native modules.** `music-metadata`, `chokidar`, and `electron-store` are pure JS. `@electron/rebuild` is removed, the `rebuild` script is gone, and packaging gets materially more reliable.
+- **Acceptance criterion #10 changes wording.** The README cannot document "the native-module rebuild step" because there no longer is one; it documents why, and what to do if a future native dependency is added. I am not quietly marking #10 satisfied under its original wording.
+- **FTS5 is an unplanned gain.** Global search can use a real full-text index instead of `LIKE` scans. Slice 3 will use it.
+- **Residual risk:** `node:sqlite` is younger than `better-sqlite3` and its API surface is narrower. The DB layer therefore sits behind `src/main/db/index.ts` so a swap back — if you ever install the C++ workload — is one file, not a rewrite.
+
+**Also discovered: `ELECTRON_RUN_AS_NODE=1` is set in this environment.** It makes Electron run scripts as plain Node, so `require('electron')` resolves the npm shim and `app` is `undefined`. It would have silently broken `electron-vite dev` and every Playwright-Electron launch. Every Electron invocation — dev, tests, probes — must clear it first. This is recorded in the README and handled in the Playwright launch config.
+
+---
+
+# Architecture
+
+Three processes, one rule: **the renderer never touches the filesystem or the database.**
+
+- **Main** — SQLite, all disk I/O, scanning, tray, global shortcuts, both windows, custom protocols.
+- **Preload** — the only bridge. A narrow, typed `window.resonance` API over `contextBridge`. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.
+- **Renderer** — all UI, and the Web Audio graph.
+
+### Two decisions worth explaining (the third, protocols, is now §A2)
+
+**Exactly two `<audio>` decks, created once and never recreated.** `createMediaElementSource()` may be called only **once per element for the lifetime of the page**; a second call kills audio silently. The graph is therefore fixed at startup and decks are reused by swapping `src`:
+
+```
+deckA <audio> ─► MediaElementSource ─► gainA ┐
+                                             ├─► 10× BiquadFilter ─► Analyser ─► masterGain ─► destination
+deckB <audio> ─► MediaElementSource ─► gainB ┘
+```
+
+Two decks yield crossfade and next-track preload from one topology. EQ and analyser sit downstream of the mix, so a crossfade passes through the EQ correctly and the visualizer shows what you actually hear.
+
+**The mini-player is a remote control, not a second player.** Only the main window owns the audio graph. The mini-player is a second `BrowserWindow` running the same bundle at a different route; it sends commands through main and receives state broadcasts back. If both owned audio you would get double playback.
+
+### File map
+
+```
+e:\Resonance\
+├─ PLAN.md, README.md, electron.vite.config.ts, electron-builder.yml
+├─ build/                       app + tray icons (.ico, .png)
+├─ shared/
+│  ├─ types.ts                  Track, Album, Playlist, PlayerState, ScanProgress
+│  └─ ipc.ts                    channel-name constants, single source of truth
+├─ src/main/
+│  ├─ index.ts                  lifecycle, single-instance lock, wiring
+│  ├─ windows/main.ts           frameless window; drag-snap + double-click maximize (§A1);
+│  │                            OWNS window-state persistence + display validation (§A5)
+│  ├─ windows/mini.ts           frameless always-on-top mini-player
+│  ├─ db/schema.ts              tables + indices + migration runner
+│  ├─ db/index.ts               connection, WAL pragmas
+│  ├─ db/tracks.ts              track queries, search, play-count
+│  ├─ db/playlists.ts           playlist CRUD + ordered membership
+│  ├─ scan/worker.ts            worker_thread: walk + parse metadata
+│  ├─ scan/controller.ts        spawns worker, batches inserts, streams progress
+│  ├─ scan/art.ts               artwork extraction, hash-keyed disk cache
+│  ├─ scan/watcher.ts           chokidar live folder watching
+│  ├─ protocol.ts               resonance-media:// + resonance-art:// (§A2)
+│  ├─ tray.ts                   tray icon, menu, now-playing tooltip
+│  ├─ shortcuts.ts              globalShortcut: media keys + volume
+│  ├─ settings.ts               electron-store: settings + session
+│  ├─ m3u.ts                    M3U/M3U8 import + export
+│  ├─ shell.ts                  showItemInFolder (G3)
+│  └─ ipc/*.ts                  one handler module per domain
+├─ src/preload/index.ts         contextBridge surface (typed, narrow)
+├─ src/renderer/src/
+│  ├─ audio/engine.ts           two-deck graph, transport, preload, crossOrigin (§A2b)
+│  ├─ audio/equalizer.ts        10 biquads + presets
+│  ├─ audio/analyser.ts         FFT data for visualizer + silence tripwire
+│  ├─ audio/crossfade.ts        gain-ramp scheduler
+│  ├─ core/queue.ts             PURE queue/shuffle/repeat machine — heavily tested
+│  ├─ core/format.ts            duration, bitrate, date formatting
+│  ├─ core/palette.ts           clamped dominant-color extraction (§A4)
+│  ├─ state/*.ts                zustand stores: player, library, ui
+│  └─ components/               TitleBar, Sidebar, LibraryTable, AlbumGrid,
+│                               NowPlaying, PlayerBar, Queue, Equalizer,
+│                               Visualizer, Settings, TrackProperties,
+│                               ContextMenu, MiniPlayer
+├─ src/renderer/src/styles/tokens.css   fixed identity gradient (§A4) + glass primitives
+└─ tests/
+   ├─ fixtures/gen-tone.ts      generates tone-440-6db.wav for the FFT tripwire (§A6)
+   ├─ unit/                     queue, m3u, eq, format, crossfade, palette
+   └─ e2e/                      Playwright-Electron: launch, navigate, screenshot,
+                                FFT tripwire + negative control, relaunch/window state
+```
+
+### Dependencies, one line of justification each
+
+`electron-vite` scaffold · `better-sqlite3` fast synchronous library DB · `music-metadata` ID3/Vorbis/FLAC tags + embedded art · `electron-store` small settings · `framer-motion` React transitions (spec) · `zustand` ~1KB store, no boilerplate · `@tanstack/react-virtual` virtualization for large libraries · `@dnd-kit/core` accessible drag-reorder for queue and playlists · `chokidar` folder watching · `@electron/rebuild` native ABI · `electron-builder` packaging · dev: `vitest`, `@playwright/test`.
+
+No CSS framework. The glass/aurora look needs hand-controlled `backdrop-filter` layering and gradient compositing; Tailwind would fight me here. CSS Modules + a token file instead.
+
+---
+
+# Build slices
+
+Each is a complete vertical increment with an exit criterion verified before the next begins. **Bold** items were added or changed in revision 2.
+
+**0 — Scaffold & spine.** electron-vite + React + TS, git init, frameless window with custom controls, **double-click-maximize and drag-snap (§A1)**, `tokens.css` with the **fixed identity gradient (§A4)**, dark/light toggle, one typed round-trip IPC, Vitest + Playwright-Electron configured, `PLAN.md` written to the repo.
+*Exit:* `npm run dev` opens a frameless glass window; `npm test` green; Playwright launches the real app and writes a screenshot; round-trip IPC returns from main; **double-click-maximize and drag-snap confirmed manually.**
+
+**1 — Database + native module.** Schema, migrations, WAL, `@electron/rebuild` wired and documented.
+*Exit:* a script run **inside Electron main** prints the SQLite version and created tables — this is what proves the ABI is right; unit tests against an in-memory DB.
+
+**2 — Scanner.** Folder picker, worker-thread walk + parse, art cache, batched insert transactions, progress streamed to the renderer, `resonance-art://` live with **privileged flags + `img-src` CSP (§A2a)**.
+*Exit:* real scan of `C:\Users\malek\Music` with pasted console output — file count, insert count, elapsed ms — **broken down by format, showing at least one each of MP3/FLAC/WAV/M4A/OGG-Opus (§A3)**; cached art on disk; artwork renders in the UI, proving CSP and protocol registration.
+
+**3 — Library UI.** Songs / Albums / Artists / Genres / Recently Added, virtualized sortable filterable table, incremental global search, drag-and-drop **of both files and folders (G1)** onto the window.
+*Exit:* Playwright screenshots of every view against your real library.
+
+**4 — Audio engine + player bar.** Two-deck graph, media protocol with byte ranges + **CORS triple (§A2b)**, transport including **an explicit Stop (G2)**, draggable seek with **buffered-range indication (G4)**, volume/mute, accurate timing, shuffle and repeat via the pure queue machine.
+*Exit:* unit tests over every shuffle × repeat × end-of-list combination; Playwright asserts `currentTime` advances and tracks auto-advance; **FFT silence tripwire (§A2b/§A6) — 500 ms averaged measurement on `tone-440-6db.wav` at t=1.0–1.5 s reads > 40, paused negative control reads < 2, plus the real-track run at the RMS-located offset with that offset reported**; **seek to ~90% of the >100 MB file resumes there (§A3)**; each format played once. **Needs you: confirm you hear sound.**
+
+**5 — Queue, playlists, M3U.** Reorderable Now Playing queue, playlist CRUD with persisted drag order, M3U/M3U8 import and export, right-click context menus with **Show in folder (G3)** and a **Properties/metadata dialog (G5)**, play-count and last-played tracking.
+*Exit:* M3U round-trip unit tests including relative paths and non-ASCII filenames (your Japanese titles are the fixture); Playwright reorder screenshot; Properties dialog screenshot.
+
+**6 — EQ, visualizer, Now Playing.** Ten biquads at 31–16k, built-in presets, custom preset save, persisted; AnalyserNode visualizer with an off switch; large art with the **clamped, localized aurora wash (§A4)**.
+*Exit:* unit tests on preset→gain mapping and filter frequencies; **screenshots with a warm-toned and a cool-toned cover, both including the player bar, proving the identity gradient is unchanged (§A4)**. **Needs you: confirm the EQ audibly changes the sound.**
+
+**7 — Desktop integration.** Tray with quick controls and now-playing tooltip, global media keys **plus volume up/down (G6)**, minimize-to-tray setting, mini-player with remembered position, **Settings screen (G7)**: theme, minimize-to-tray, crossfade duration, watched folders, art-cache clear, and the shortcut list with registration status.
+*Exit:* Playwright asserts the mini-player opens showing the correct track. **This is the slice I can least self-verify — you get a click-by-click checklist covering tray, media keys, always-on-top, and Snap behavior (§A1).**
+
+**8 — Crossfade, sleep timer, session restore, shortcuts, watching.** Gain-ramp crossfade (0–12 s, default off) with next-track preload, sleep timer, full session restore, in-app keyboard shortcuts, chokidar watching.
+*Exit:* unit tests for the ramp scheduler and sleep timer; Playwright quits and relaunches and asserts queue, track, position, volume, EQ, theme, **and main-window `x`/`y`/`width`/`height`/`isMaximized` (§A5)** all returned; **plus an off-screen-bounds case — saved rectangle outside all displays falls back to centered, not invisible.**
+
+**9 — Packaging.** electron-builder NSIS installer + portable build, icons, README covering dev, the rebuild step, and the build command.
+*Exit:* the `.exe` exists at a stated path with its size. **I will not install it — you run it.**
+
+---
+
+# Risk register
+
+| Risk | Mitigation |
+|---|---|
+| **Cross-origin media → Web Audio outputs silence while UI looks healthy (§A2b)** | **`corsEnabled` + `Access-Control-Allow-Origin: *` + `crossOrigin='anonymous'` set before `src`. Non-zero-FFT assertion is the tripwire.** |
+| `createMediaElementSource` called twice → silent permanent audio death | Decks constructed once at startup, `src` swapped, never reconstructed. Enforced structurally in `engine.ts`. |
+| `ended` fires twice → tracks skip in pairs | Every advance carries a monotonic transition token; stale transitions dropped. Unit-tested. |
+| AudioContext starts suspended (autoplay policy) | `autoplayPolicy: 'no-user-gesture-required'` plus explicit resume on first interaction. |
+| `better-sqlite3` ABI mismatch with Electron | `@electron/rebuild` on postinstall; VS2022 confirmed present as source-build fallback. Documented escape hatch: Node's built-in `node:sqlite`. |
+| Missing privileged flags or CSP → media/art fail silently (§A2a) | Explicit flags listed; both proven by slice-2 and slice-4 exits rather than assumed. |
+| No byte-range support → seeking breaks on large files | `net.fetch(file://)` preserves ranges; **proven against a >100 MB file, not inferred.** |
+| Metadata parsing blocks main → whole UI freezes | Scan runs in a `worker_thread`; main only performs batched DB transactions. |
+| Orphaned audio nodes / listeners leak across track changes | Nodes are long-lived by design; React effects return teardowns; leak check at the slice-4 gate. |
+| Tray icon vanishes after a few seconds | Classic Electron GC bug — `Tray` held in a module-scope reference. |
+| `globalShortcut.register` returns false when another app owns the key | Result checked and surfaced in Settings; never failed silently. |
+| **Snap Layouts hover flyout unavailable (custom chrome)** | **Intentionally forfeited (§A1). Win+Arrow, Win+Z, double-click-maximize, drag-snap all remain — manual checklist, not screenshot.** |
+| **Vivid album art overwhelms the brand identity (§A4)** | **Aurora clamped and confined behind Now Playing art; identity gradient is a fixed token. Proven with warm and cool covers.** |
+| Unicode/relative paths corrupt M3U round-trips | Tested against your actual Japanese-titled files. |
+| Art cache grows without bound | Content-hash keyed, deduplicated, bounded, clearable from Settings. |
+| Moved or deleted files crash playback | `available` flag, checked on play; marked unavailable and skipped rather than throwing. |
+| **Window restores off-screen after a display change → app appears not to launch (§A5)** | **Saved bounds validated against `screen.getAllDisplays()`; non-intersecting rectangles fall back to centered. Covered by a slice-8 test case.** |
+| **Instantaneous FFT sample gives a false pass or false alarm (§A6)** | **500 ms averaged measurement on a −6 dBFS tone fixture, `smoothingTimeConstant = 0`, with a paused negative control asserting the difference rather than a bare threshold.** |
+
+### Honest limitations
+
+- **I cannot hear audio.** I can prove the graph is connected, that the analyser sees real signal, that filter nodes hold correct values, and that playback advances — but "the EQ sounds right" and "crossfade sounds smooth" are yours. I will keep those separate rather than blurring them.
+- **Tray, global media keys, always-on-top, and window snapping** are OS-level behaviors a test harness can only partially drive.
+- **Snap Layouts hover flyout is gone by choice** (§A1) — a real, accepted regression against native chrome.
+- **WMA is best-effort**, dependent on system codecs, as the spec allows.
+- **Any format missing from the library at verification time is reported UNVERIFIED**, never assumed working.
+- **Smart playlists are cut.** Play-count and last-played are still tracked, so they stay cheap to add later.
+
+---
+
+# GATE — re-run against revision 3
+
+Audit rules from the build prompt: every stage has an exit criterion, every file is used, risks are covered.
+
+**Check 1 — every slice has a falsifiable exit criterion.** PASS. All ten state a command, an assertion, or a named manual check. Slices 4, 6, and 7 additionally carry explicit *needs-you* items, kept distinct from what I verify.
+
+**Check 2 — every file in the map is claimed by a slice.** PASS after fixes. `shared/*`, `TitleBar`, `windows/main` → 0 (window-state persistence lands here, asserted in 8); `db/*` → 1; `scan/{worker,controller,art}`, `protocol` → 2; `LibraryTable`/`AlbumGrid` → 3; `audio/{engine,analyser}`, `core/{queue,format}`, `PlayerBar`, `tests/fixtures/gen-tone` → 4; `db/playlists`, `m3u`, `shell`, `Queue`, `ContextMenu`, `TrackProperties` → 5; `audio/equalizer`, `core/palette`, `Visualizer`, `NowPlaying` → 6; `tray`, `shortcuts`, `windows/mini`, `Settings`, `MiniPlayer` → 7; `audio/crossfade`, `scan/watcher`, `settings` → 8.
+
+**Check 3 — risks covered.** PASS. Every register row names the slice that proves it. The two silent-failure classes (§A2a, §A2b) now have positive assertions rather than absence-of-error.
+
+**Check 4 — spec clause coverage.** FAILED on first pass; seven gaps found and closed:
+
+| | Gap | Fix |
+|---|---|---|
+| G1 | Spec says drag-drop "files **or** folders"; plan said folders only | Slice 3 covers both |
+| G2 | Spec lists **Stop** in transport; plan said only play/pause/next/prev | Slice 4 adds explicit Stop |
+| G3 | "Show in folder" context action had no main-process owner | Added `main/shell.ts`, slice 5 |
+| G4 | Spec requires **buffered** indication on the progress bar; unmentioned | Slice 4 adds buffered ranges |
+| G5 | "Properties/metadata" context action had no component | Added `TrackProperties`, slice 5 |
+| G6 | Spec requires global **volume up/down** shortcuts; plan said media keys only | Slice 7 adds them |
+| G7 | Settings screen was implied across slices but never owned | Slice 7 owns it, contents enumerated |
+
+**Check 5 — do the verification methods actually prove what they claim?** *New check, added in rev 3 because two of the three defects found in review were bad verification rather than bad design.* FAILED on first pass; two closed:
+
+| | Defect | Fix |
+|---|---|---|
+| V1 | "Verify Snap Layouts by screenshot" — a hover interaction cannot be proven by a static image | §A1: forfeited by decision, manual checklist for what remains |
+| V2 | Instantaneous FFT frame treated as proof of signal | §A6: 500 ms average, tone fixture, paused negative control |
+
+Sweeping the remaining exit criteria against the same standard: slice 1's ABI check runs *inside Electron* rather than under plain Node, which is the only place the answer is meaningful. Slice 2's per-format counts come from actual parse results, not file extensions. Slice 8's relaunch test compares captured values across a real quit, not a soft reload. Slice 4's range-seek check asserts resumed playback position, not merely that a request was issued. No further method defects found.
+
+**Regression watch (rev 3):** §A5 existed in rev 1 and was destroyed by my own rev-2 rewrite. Amendments are now additive sections rather than in-place rewrites of the file map, and Check 2 is re-run in full after every revision specifically to catch this class of loss.
+
+**GATE RESULT: PASS** (5 checks, 2 initial failures, 7 coverage gaps + 2 verification defects closed, re-checked clean).
+
+---
+
+# Verification
+
+Running throughout, not saved for the end:
+
+- `npm test` — Vitest over queue/shuffle/repeat, M3U round-trips, EQ preset math, crossfade ramps, palette clamping, formatting.
+- `npm run test:e2e` — Playwright launches the real Electron app, navigates, captures screenshots compared against the stated glass/aurora goal, and asserts the non-zero-FFT tripwire.
+- Real scans of `C:\Users\malek\Music` with pasted timings and per-format counts.
+- A quit-and-relaunch test asserting full session restore.
+
+**Definition of done:** the spec's ten acceptance criteria, each marked *verified by me*, *needs your click*, or *not met* — with no third category quietly folded into the first. The final report states what is done, what is partial, what is unverified, and the residual risk.

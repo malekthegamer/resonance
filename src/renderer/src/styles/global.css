@@ -1,0 +1,79 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text-hi);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Text selection is opt-in in a desktop shell; dragging shouldn't select. */
+  user-select: none;
+  cursor: default;
+}
+
+/* The ambient wash lives on a fixed layer so glass panels have something real to
+   blur. Sitting behind everything at z-index 0 keeps it out of the way. */
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--ambient);
+  pointer-events: none;
+  z-index: 0;
+  transition: background var(--dur-slow) var(--ease-out);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-a);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.12);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.2);
+  background-clip: content-box;
+}
+:root[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: rgb(16 18 34 / 0.18);
+  background-clip: content-box;
+}
