@@ -15,7 +15,14 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: BUNDLE_ESM_DEPS })],
     resolve: { alias: { '@shared': r('shared') } },
     build: {
-      rollupOptions: { input: { index: r('src/main/index.ts') } }
+      rollupOptions: {
+        input: {
+          index: r('src/main/index.ts'),
+          // Emitted as its own entry so it can be spawned as a worker thread.
+          'scan-worker': r('src/main/scan/worker.ts')
+        },
+        output: { entryFileNames: '[name].js' }
+      }
     }
   },
   preload: {

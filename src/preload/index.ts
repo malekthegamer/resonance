@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AppInfo, DbInfo, Settings } from '@shared/types'
+import type { AppInfo, DbInfo, ScanProgress, Settings, Track } from '@shared/types'
+import type { LibraryStats } from '../main/ipc/library'
 
 /**
  * The only bridge between main and renderer.
@@ -15,7 +16,21 @@ const api = {
   getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.APP_INFO),
 
   library: {
-    dbInfo: (): Promise<DbInfo> => ipcRenderer.invoke(IPC.DB_INFO)
+    dbInfo: (): Promise<DbInfo> => ipcRenderer.invoke(IPC.DB_INFO),
+    pickAndScan: (): Promise<ScanProgress | null> => ipcRenderer.invoke(IPC.LIB_PICK_AND_SCAN),
+    scanPaths: (paths: string[]): Promise<ScanProgress> =>
+      ipcRenderer.invoke(IPC.LIB_SCAN_PATHS, paths),
+    cancelScan: (): void => ipcRenderer.send(IPC.LIB_CANCEL_SCAN),
+    getTracks: (): Promise<Track[]> => ipcRenderer.invoke(IPC.LIB_GET_TRACKS),
+    search: (query: string): Promise<Track[]> => ipcRenderer.invoke(IPC.LIB_SEARCH, query),
+    stats: (): Promise<LibraryStats> => ipcRenderer.invoke(IPC.LIB_STATS),
+    onScanProgress: (cb: (p: ScanProgress) => void): (() => void) => {
+      const listener = (_e: unknown, p: ScanProgress): void => cb(p)
+      ipcRenderer.on(IPC.LIB_SCAN_PROGRESS, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.LIB_SCAN_PROGRESS, listener)
+      }
+    }
   },
 
   settings: {

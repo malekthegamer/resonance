@@ -10,7 +10,10 @@
       Omitting these makes audio and art fail *silently* under sandbox.
       'unsafe-inline' for style-src is required by Vite's dev style injection and
       by Framer Motion's inline transforms; no inline scripts are permitted.
-      connect-src allows the dev-server websocket for HMR.
+      connect-src allows the dev-server websocket for HMR, and both custom
+      schemes because fetch() is governed by connect-src rather than img-src or
+      media-src — needed for album-art palette sampling and for range-request
+      verification.
     -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -21,7 +24,7 @@
         img-src 'self' resonance-art: data: blob:;
         media-src 'self' resonance-media: blob:;
         font-src 'self' data:;
-        connect-src 'self' ws: http://localhost:*;
+        connect-src 'self' ws: http://localhost:* resonance-art: resonance-media:;
         object-src 'none';
         base-uri 'none';
         form-action 'none';

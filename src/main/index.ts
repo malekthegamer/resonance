@@ -5,6 +5,12 @@ import type { AppInfo, DbInfo, Settings } from '@shared/types'
 import { createMainWindow, getMainWindow } from './windows/main'
 import { getAllSettings, getSetting, setSetting } from './settings'
 import { closeDb, getDb, getDbInfo } from './db/open'
+import { registerLibraryIpc } from './ipc/library'
+import { registerProtocolHandlers, registerSchemes } from './protocol'
+
+// Must run before app.whenReady() — privileged scheme registration is only
+// honoured at this point in the lifecycle (plan §A2a).
+registerSchemes()
 
 // Must run before any app.getPath('userData') call.
 //
@@ -40,7 +46,9 @@ if (!app.requestSingleInstanceLock()) {
     )
     console.log(`[db] ${info.path}`)
 
+    registerProtocolHandlers()
     registerIpc()
+    registerLibraryIpc()
     createMainWindow()
 
     app.on('activate', () => {
