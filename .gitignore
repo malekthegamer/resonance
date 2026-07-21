@@ -6,4 +6,6 @@ release/
 .vite/
 test-results/
 playwright-report/
-tests/fixtures/*.wav
+# Generated audio fixtures (see tests/fixtures/gen-audio.ts). Regenerated on
+# demand; large-tone.wav alone is ~112 MB and must never be committed.
+tests/fixtures/media/

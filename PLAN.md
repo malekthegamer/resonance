@@ -91,13 +91,30 @@ Ordering matters in (3): setting `crossOrigin` after `src` does not retroactivel
 
 **Added to the slice-4 exit criterion:** an assertion that the analyser returns non-zero frequency data during playback. That is the automated tripwire for this bug — a silent-but-"playing" element yields an all-zero FFT, which distinguishes it from every other failure mode.
 
-## A3 — Format and range verification against real non-MP3 files
+## A3 — Format and range fixtures are **generated**, not sourced
 
-The library is currently MP3-only, so the range-seek mitigation (aimed at large FLAC) and the spec's format matrix would otherwise go untested. You are adding FLAC, M4A/AAC, OGG/Opus, WAV, and one >100 MB file before the run.
+*Revised in rev 4.* The original plan asked the user to supply FLAC / M4A / OGG-Opus / WAV files and one over 100 MB. That was the wrong ask: their library is **53 MP3s, largest 8.2 MB**, they use only MP3, and a >100 MB audio file is not a thing a person casually has. Making verification depend on the user sourcing files they don't own would have meant the format matrix quietly went untested.
 
-- **Slice 2 exit:** scan console output must show **at least one track of each required format** parsed and inserted, listed by format.
-- **Slice 4 exit:** byte-range seeking verified specifically against the **>100 MB file** — seek to ~90%, confirm playback resumes there rather than stalling or restarting. Each format loaded and played at least once.
-- **Reporting rule:** if a required format is absent from the scanned library at verification time, it is marked **UNVERIFIED** in the final report. I will not claim format or range support I did not exercise. WMA remains best-effort per spec.
+**All fixtures are generated at test setup**, from a synthesized tone, by `tests/fixtures/gen-audio.ts`:
+
+| Fixture | Purpose |
+|---|---|
+| `tone-440-6db.wav` | The FFT silence tripwire (§A6) |
+| `fixture.flac` / `.m4a` / `.ogg` / `.opus` / `.wav` | Format matrix + tag normalization |
+| `large-tone.wav` (~112 MB) | Range-seek proof |
+
+Two things make this worth doing rather than testing MP3 alone:
+
+- **Tag normalization spans three unrelated systems** — ID3 (MP3), Vorbis comments (FLAC/OGG/Opus), MP4 atoms (M4A). `music-metadata` flattens them into one shape *mostly*; the gaps (notably album-artist) are exactly where a silent mis-tag would appear. Each fixture is written with known tag values and the scanner must read them back exactly.
+- **Size is load-bearing for the range test.** Below a few MB Chromium buffers the whole resource and never issues a Range request, so a small-file seek test passes without exercising the plumbing at all. ~112 MB forces streaming. Uncompressed WAV is ~10 MB/minute, so this needs no encoder and no download.
+
+**Dependency:** `ffmpeg-static` (dev-only, ~80 MB, never shipped) — one binary that produces genuinely-encoded FLAC/OGG/Opus/M4A rather than files that merely claim those extensions. WAV generation is pure JS and needs nothing.
+
+- **Slice 2 exit:** scan output shows per-format parsed/inserted counts covering MP3 (real library) + FLAC + WAV + M4A + OGG + Opus, and asserts the known tag values round-trip through each tag system.
+- **Slice 4 exit:** range seek verified against `large-tone.wav` (seek to ~90%, confirm playback resumes there, not stalls or restarts) **and** against `fixture.flac`, because FLAC seeks via a seek table — a different code path from WAV's direct byte arithmetic.
+- **Reporting rule unchanged:** any format not actually exercised is marked **UNVERIFIED**. WMA stays best-effort per spec.
+
+**Also found:** the user has **8 real `.m3u8` playlists** in `Music/playlists`, using absolute Windows paths and non-ASCII titles. These become the slice-5 M3U import fixtures — real-world data beats synthesized data for a parser whose whole job is tolerating real-world files.
 
 ## A4 — Blue→purple locked as fixed brand identity
 
