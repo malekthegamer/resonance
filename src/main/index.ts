@@ -1,8 +1,20 @@
+import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AppInfo, Settings } from '@shared/types'
+import type { AppInfo, DbInfo, Settings } from '@shared/types'
 import { createMainWindow, getMainWindow } from './windows/main'
 import { getAllSettings, getSetting, setSetting } from './settings'
+import { closeDb, getDb, getDbInfo } from './db/open'
+
+// Must run before any app.getPath('userData') call.
+//
+// setName alone is not enough: Electron resolves userData from the app name
+// before this executes, so in development it stays %APPDATA%\Electron. Setting
+// the path explicitly makes dev and packaged builds agree on one location —
+// otherwise the library you build in dev is not the library the installed app
+// opens, and relocating it later orphans a real user's library.
+app.setName('Resonance')
+app.setPath('userData', join(app.getPath('appData'), 'Resonance'))
 
 // Only one Resonance. A second launch focuses the existing window instead of
 // opening a rival instance that would fight over the library DB and the tray.
@@ -18,6 +30,16 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    // Open (and migrate) the library DB before any window can query it. Doing
+    // this eagerly means a schema problem surfaces at launch rather than on the
+    // first library interaction.
+    const info = getDbInfo()
+    console.log(
+      `[db] sqlite ${info.sqlite} · schema v${info.schemaVersion}/${info.expectedSchemaVersion} · ` +
+        `journal=${info.journalMode} · tables=[${info.tables.join(', ')}] · tracks=${info.trackCount}`
+    )
+    console.log(`[db] ${info.path}`)
+
     registerIpc()
     createMainWindow()
 
@@ -30,22 +52,22 @@ if (!app.requestSingleInstanceLock()) {
     // Slice 7 introduces minimize-to-tray, which will make this conditional.
     if (process.platform !== 'darwin') app.quit()
   })
+
+  // Close the DB cleanly so WAL is checkpointed rather than left for recovery.
+  app.on('will-quit', closeDb)
 }
 
 function sqliteVersion(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { DatabaseSync } = require('node:sqlite')
-    const db = new DatabaseSync(':memory:')
-    const row = db.prepare('SELECT sqlite_version() AS v').get() as { v: string }
-    db.close()
-    return row.v
+    return getDb().sqliteVersion
   } catch {
     return null
   }
 }
 
 function registerIpc(): void {
+  ipcMain.handle(IPC.DB_INFO, (): DbInfo => getDbInfo())
+
   ipcMain.handle(IPC.PING, (): string => 'pong')
 
   ipcMain.handle(IPC.APP_INFO, (): AppInfo => {

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AppInfo, Settings } from '@shared/types'
+import type { AppInfo, DbInfo, Settings } from '@shared/types'
 
 /**
  * The only bridge between main and renderer.
@@ -13,6 +13,10 @@ import type { AppInfo, Settings } from '@shared/types'
 const api = {
   ping: (): Promise<string> => ipcRenderer.invoke(IPC.PING),
   getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.APP_INFO),
+
+  library: {
+    dbInfo: (): Promise<DbInfo> => ipcRenderer.invoke(IPC.DB_INFO)
+  },
 
   settings: {
     getAll: (): Promise<Settings> => ipcRenderer.invoke(IPC.SETTINGS_GET),

@@ -17,6 +17,9 @@ export const IPC = {
   WIN_IS_MAXIMIZED: 'win:isMaximized',
   WIN_MAXIMIZE_CHANGED: 'win:maximizeChanged',
 
+  // Library database
+  DB_INFO: 'db:info',
+
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set'

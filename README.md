@@ -35,6 +35,16 @@ npm run dev
 
 The Playwright test harness strips it automatically (`tests/e2e/helpers.ts`).
 
+### ⚠ Orphaned Electron processes
+
+Resonance holds a single-instance lock, so a leftover Electron process makes every
+new launch quit instantly — including test runs, which then fail with
+`Target page, context or browser has been closed`. If that happens:
+
+```powershell
+Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
 ## Testing
 
 ```bash

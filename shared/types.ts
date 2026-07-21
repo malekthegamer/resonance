@@ -12,6 +12,17 @@ export interface AppInfo {
   sqlite: string | null
 }
 
+/** Runtime evidence about the library database (proven, not assumed). */
+export interface DbInfo {
+  path: string
+  sqlite: string
+  schemaVersion: number
+  expectedSchemaVersion: number
+  journalMode: string
+  tables: string[]
+  trackCount: number
+}
+
 /** Persisted main-window geometry (see plan §A5). */
 export interface WindowState {
   x?: number
