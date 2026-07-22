@@ -77,7 +77,7 @@ Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
 
 ```bash
 npm test          # Vitest — pure logic (154 tests)
-npm run test:e2e  # builds, then drives the real Electron app (76 tests)
+npm run test:e2e  # builds, then drives the real Electron app (77 tests)
 ```
 
 Audio fixtures are **generated**, not committed — `tests/fixtures/gen-audio.ts` synthesizes tagged FLAC/M4A/OGG/Opus/WAV/MP3 from a tone via `ffmpeg-static`, plus a ~112 MB file for range-seek testing. First run takes a few seconds; afterwards they are reused.
@@ -151,6 +151,16 @@ Consequences:
 Full reasoning and the diagnosis trail are in [PLAN.md](PLAN.md) §A7.
 
 ---
+
+## Documentation
+
+| File | What it covers |
+|---|---|
+| [CLAUDE.md](CLAUDE.md) | Orientation, commands, environment landmines, ground rules |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it fits together and the constraints behind it |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Why — including the choices that were wrong first |
+| [docs/STATUS.md](docs/STATUS.md) | What's done, what's missing, known issues |
+| [PLAN.md](PLAN.md) | Historical build plan; superseded by the above |
 
 ## Architecture
 

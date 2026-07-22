@@ -1,3 +1,12 @@
+> **HISTORICAL DOCUMENT.** This is the build plan as written before and
+> during construction, kept for the reasoning and the amendment log. It is
+> *not* current truth — several decisions in it were later reversed
+> (notably filename inference, §A3/§A7 context).
+>
+> For the current state see [docs/STATUS.md](docs/STATUS.md),
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+> [docs/DECISIONS.md](docs/DECISIONS.md).
+
 # Resonance — Build Plan
 
 > **Revision 3.** Rev 2 applied four review corrections plus one defect I found while applying them (§A2b, CORS/Web Audio silence). Rev 3 applies two more: window-state restore (§A5, a responsibility I dropped during the rev-2 rewrite) and a rigorous averaged FFT tripwire (§A6). GATE re-run at the bottom.
