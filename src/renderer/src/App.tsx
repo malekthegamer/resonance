@@ -31,6 +31,7 @@ import { NowPlaying } from './components/NowPlaying'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ContextMenu, type MenuItem } from './components/ContextMenu'
 import { TrackProperties } from './components/TrackProperties'
+import { TagEditor } from './components/TagEditor'
 import { Toast } from './components/Toast'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import {
@@ -96,6 +97,7 @@ export default function App(): React.JSX.Element {
   const [panel, setPanel] = useState<'queue' | 'eq' | 'now' | 'settings' | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [properties, setProperties] = useState<Track | null>(null)
+  const [tagEditorTracks, setTagEditorTracks] = useState<Track[] | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [renamingPlaylistId, setRenamingPlaylistId] = useState<number | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null)
@@ -366,6 +368,10 @@ export default function App(): React.JSX.Element {
         : []),
       { separator: true, label: '' },
       {
+        label: `Edit tags${suffix}`,
+        onSelect: () => setTagEditorTracks(targets)
+      },
+      {
         label: 'Show in folder',
         // Only ever one file — opening 12 Explorer windows would be hostile.
         disabled: false,
@@ -629,6 +635,20 @@ export default function App(): React.JSX.Element {
       )}
       {properties && (
         <TrackProperties track={properties} onClose={() => setProperties(null)} />
+      )}
+      {tagEditorTracks && (
+        <TagEditor
+          tracks={tagEditorTracks}
+          onClose={() => setTagEditorTracks(null)}
+          onSaved={(message) => {
+            setToast(message)
+            // The main process rescans the written files, but this window holds
+            // its own copy of the library — without reloading it the table would
+            // keep showing the old titles until something else happened to
+            // refresh, which reads as the edit not having worked.
+            void load()
+          }}
+        />
       )}
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
       {confirmDelete && (

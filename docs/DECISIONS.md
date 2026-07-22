@@ -56,6 +56,20 @@ The revert taught more than the feature:
 The lesson: don't invent structure you cannot verify, and when reverting, hunt
 for the derived fields the original change touched indirectly.
 
+**The parser is back, as a button.** `core/fillFromFilename.ts` is that same
+code, and the difference is the whole point: it now only ever fills a form the
+user is looking at, and nothing reaches a file until they read it and press
+Save. The objection was never that the guesses were bad — it was that the app
+made them silently. A suggestion the user reviews is the opposite of an
+invention made behind their back, so the parser is free to guess and free to be
+wrong. An e2e test asserts that opening the editor, pressing "Fill from
+filename" and then cancelling leaves the file byte-identical.
+
+What did *not* come back is the canonicalization pass that merged "ReZero" and
+"Re ZERO - Starting Life in Another World" into one album. That needed a global
+view of the library and ran without asking; there is no version of it that fits
+inside a per-file review step.
+
 ---
 
 ## Tags are written into the files, with a one-time backup

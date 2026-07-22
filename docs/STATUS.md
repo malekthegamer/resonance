@@ -1,11 +1,10 @@
 # Status
 
-Version **0.1.4** · 233 unit tests, 107 e2e tests, all passing · shipped and in
+Version **0.1.4** · 271 unit tests, 113 e2e tests, all passing · shipped and in
 daily use.
 
-Unreleased on `master`: track selection (slice 1), drag-to-playlist (slice 2),
-and the tag write core (slice 3 — real IPC, no UI yet). The tag editor dialog is
-next.
+Unreleased on `master`: track selection, drag-to-playlist, and the tag editor
+(write core plus dialog). Not yet released — that is the remaining work.
 
 Everything in the original spec is built except smart playlists, which were cut
 deliberately. What follows is what is *not* done, what is known-broken, and what
@@ -17,7 +16,8 @@ is unverified. Verified means it was executed and observed, not reasoned about.
 
 Library scanning, all five browse views, virtualized sortable table with
 click/ctrl/shift multi-select, dragging selected tracks onto a sidebar playlist
-or the queue, FTS search,
+or the queue, a tag editor that writes real tags into files (single and
+multi-track, cover art, fill-from-filename, one-time backups), FTS search,
 drag-and-drop of files/folders/playlists, full transport with shuffle and all
 three repeat modes, reorderable queue, playlist CRUD with persisted drag order,
 M3U/M3U8 import and export, 10-band EQ with presets, spectrum visualizer, Now
@@ -46,17 +46,18 @@ Enter/Space, which already mean "play" on a track row, and there is no sensible
 keyboard path from the table to a sidebar drop target. The context menu does
 everything dragging does, so this is an ergonomics gap rather than a dead end.
 
-### Tag editing has no UI yet
-The write core is built, wired to IPC and tested — reading, per-field writes,
-multi-track edits, cover art, one-time backups, and a rescan that folds changes
-back into the database and FTS. There is no dialog, so nothing in the app calls
-it yet. That is slice 4.
+### Untagged libraries still start as three empty views
+Albums, Artists and Genres are one "Unknown" bucket until files carry tags.
+**Inferring them automatically is intentionally not done** — that was built and
+reverted at the user's request; see [DECISIONS.md](DECISIONS.md). The tag editor
+is the fix, but it is manual by design: the library only improves as far as the
+user actually tags it. "Fill from filename" makes that fast; it never fires on
+its own.
 
-### Untagged libraries have three empty views
-Albums, Artists and Genres are one "Unknown" bucket when files carry no tags.
-**This is intentional** — filename inference was built and reverted at the
-user's request; see [DECISIONS.md](DECISIONS.md). The tag editor is the honest
-fix: let the user set real metadata rather than have the app guess.
+### Cover art is untested on ogg and opus
+Those carry pictures as base64 `METADATA_BLOCK_PICTURE`, which the fixture
+generator cannot produce, so artwork coverage stops at mp3, flac and m4a. It may
+work; nothing proves it.
 
 ### Backups are never pruned
 Every file edited for the first time is copied whole into
@@ -118,6 +119,15 @@ the OS has the final say. Deliberately not asserted in the e2e suite, since a
 test that fails a third of the time gets ignored rather than believed. **Check
 by hand** when touching mini-player code.
 
+**`desktop.spec.ts` "Settings persists changes" failed once under CI
+conditions.** Seen a single time in a full-suite run; then 112/112 twice more,
+and 5/5 running that spec alone. Not reproduced, so not diagnosed and **not
+fixed** — recorded here rather than forgotten. The suspicion is environmental,
+the same shape as the mini-player entry below: that run's log shows all six
+global shortcuts failing to register, which happens when another Electron
+process still holds them. If it recurs, capture `test-results/` before rerunning
+— a passing rerun deletes the evidence, which is what happened the first time.
+
 **Closing the window does not quit the app.** Minimize-to-tray is on by default,
 so ✕ hides to tray. Quit via the tray menu. This surprises people, including
 during development — a running instance holds the single-instance lock.
@@ -126,13 +136,13 @@ during development — a running instance holds the single-instance lock.
 
 ## Test coverage notes
 
-**Unit (233)** — queue state machine (exhaustive across shuffle × repeat ×
+**Unit (271)** — queue state machine (exhaustive across shuffle × repeat ×
 end-of-list), M3U parsing/writing, EQ presets and clamping, sleep timer,
 grouping/sorting, filename→title repair, database schema and migrations,
 generated fixture integrity, selection arithmetic, drag routing, tag
-write/read/backup.
+write/read/backup, tag-form merging, filename parsing.
 
-**E2E (107)** — drives the real Electron app across 14 spec files. Highlights
+**E2E (113)** — drives the real Electron app across 14 spec files. Highlights
 worth preserving:
 
 - `playback.spec.ts` — the **FFT silence tripwire**: measures analyser peak over

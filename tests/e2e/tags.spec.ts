@@ -30,6 +30,12 @@ const BACKUPS = join(USER_DATA, 'tag-backups')
 
 const FORMATS = ['mp3', 'flac', 'm4a', 'ogg', 'opus', 'wav'] as const
 
+const UI_FILES = [
+  'Attack on Titan OP 1 Guren no Yumiya.mp3',
+  'Attack on Titan OP 2 Jiyuu no Tsubasa.mp3',
+  'Attack on Titan ED 1 Utsukushiki Zankoku na Sekai.mp3'
+]
+
 const NEW_TAGS = {
   title: 'Retagged 書き換え',
   artist: 'Edited Artist ñ',
@@ -62,6 +68,10 @@ test.beforeAll(async () => {
   mkdirSync(MEDIA, { recursive: true })
   const src = fixturePaths().byFormat
   for (const ext of FORMATS) copyFileSync(src[ext]!, join(MEDIA, `tagme.${ext}`))
+
+  // Named the way the author's real library is named, so "Fill from filename"
+  // is exercised against the shape it was written for rather than a stub.
+  for (const name of UI_FILES) copyFileSync(src['mp3']!, join(MEDIA, name))
 
   ;({ app, page } = await launchApp(USER_DATA))
   await page.evaluate((dir) => window.resonance.library.scanPaths([dir]), MEDIA)
@@ -283,6 +293,190 @@ test('tagging a large file mid-stream, with the handle definitely still open', a
   } else {
     expect(result.error).toMatch(/in use|EBUSY|EPERM/i)
   }
+})
+
+/* ---------------------------------------------------------------- the dialog */
+
+/**
+ * Selects rows **by track id** and opens the tag editor from the context menu.
+ *
+ * Not by row position: every fixture shares the title "Resonance Test Tone", so
+ * sort order between them is arbitrary. An earlier version of this helper
+ * searched and took `nth(0)`, which quietly opened the editor on a different
+ * file than the test named — it only surfaced because that file happened to be
+ * the WAV, whose NUL-terminated title made the assertion fail. A test that
+ * picks the wrong row and passes is worse than one that fails.
+ */
+async function openEditorFor(...filenames: string[]): Promise<void> {
+  await page.getByTestId('nav-songs').click()
+  await page.getByTestId('search').fill('')
+  await page.keyboard.press('Escape')
+
+  const ids = await page.evaluate(async (names) => {
+    const all = await window.resonance.library.getTracks()
+    return names.map((n) => all.find((t) => t.path.endsWith(n))?.id ?? -1)
+  }, filenames)
+  expect(ids.every((id) => id > 0), `no library row for ${filenames.join(', ')}`).toBe(true)
+
+  const rowFor = (id: number) =>
+    page.locator(`[data-testid="track-row"][data-track-id="${id}"]`)
+
+  await rowFor(ids[0]!).click()
+  for (let i = 1; i < ids.length; i++) {
+    await rowFor(ids[i]!).click({ modifiers: ['ControlOrMeta'] })
+  }
+
+  await rowFor(ids[0]!).click({ button: 'right' })
+  await page.getByTestId('context-menu').getByRole('menuitem', { name: /Edit tags/ }).click()
+  await expect(page.getByTestId('tag-editor')).toBeVisible()
+}
+
+test('the context menu offers Edit tags and the dialog loads real values', async () => {
+  await openEditorFor(UI_FILES[0]!)
+
+  // Populated from the file, not the database row — the dialog reads the file
+  // it is about to overwrite.
+  await expect(page.getByTestId('tag-title')).toHaveValue('Resonance Test Tone')
+  await expect(page.getByTestId('tag-artist')).toHaveValue('Test Artist 紅蓮')
+
+  // Save must not offer to do anything before a field is touched.
+  await expect(page.getByTestId('tag-save')).toBeDisabled()
+
+  await page.screenshot({ path: 'test-results/tag-editor-single.png', animations: "disabled" })
+  await page.getByTestId('tag-editor-backdrop').click({ position: { x: 5, y: 5 } })
+  await expect(page.getByTestId('tag-editor')).toBeHidden()
+})
+
+test('editing one track writes the file and updates the table', async () => {
+  await openEditorFor(UI_FILES[0]!)
+
+  await page.getByTestId('tag-title').fill('Guren no Yumiya')
+  await expect(page.getByTestId('tag-save')).toBeEnabled()
+  await page.getByTestId('tag-save').click()
+
+  await expect(page.getByTestId('tag-editor')).toBeHidden()
+  await expect(page.getByTestId('toast')).toContainText('Tagged 1 track')
+
+  // The row the user is looking at must change, not just the file — otherwise
+  // a correct edit reads as a failed one.
+  await expect
+    .poll(async () => (await tracksNamed('Guren no Yumiya.mp3'))[0]?.title)
+    .toBe('Guren no Yumiya')
+})
+
+/*
+ * Saving raises a toast, so reopening the editor straight afterwards used to put
+ * the toast on top of Cancel and Save — the dialog covering its own footer with
+ * something unclickable. Exactly the class of "the button does nothing" bug this
+ * app has already shipped once.
+ */
+test('a toast never covers the dialog buttons', async () => {
+  await openEditorFor(UI_FILES[2]!)
+  await page.getByTestId('tag-genre').fill('Toast Check')
+  await page.getByTestId('tag-save').click()
+  await expect(page.getByTestId('toast')).toBeVisible()
+
+  // Reopen while that toast is still on screen.
+  await openEditorFor(UI_FILES[2]!)
+  await expect(page.getByTestId('toast')).toBeVisible()
+
+  const save = page.getByTestId('tag-save')
+  const box = (await save.boundingBox())!
+  const topmost = await page.evaluate(
+    ({ x, y }) => {
+      const el = document.elementFromPoint(x, y)
+      return el?.closest('[data-testid]')?.getAttribute('data-testid') ?? el?.tagName ?? '?'
+    },
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  )
+  expect(topmost, 'the save button must be what is actually under the cursor').toBe('tag-save')
+
+  await page.getByTestId('tag-editor-backdrop').click({ position: { x: 5, y: 5 } })
+})
+
+test('a multi-track edit shows mixed fields and changes only what was typed', async () => {
+  await openEditorFor(...UI_FILES)
+
+  await expect(page.getByTestId('tag-editor-subject')).toHaveText('3 tracks')
+
+  /*
+   * One of the three was retitled by the previous test, so titles now differ.
+   * The field must show a placeholder rather than one arbitrary track's title,
+   * which a user would reasonably read as the value for all three.
+   */
+  await expect(page.getByTestId('tag-title')).toHaveAttribute('data-mixed', 'true')
+  await expect(page.getByTestId('tag-title')).toHaveValue('')
+  await expect(page.getByTestId('tag-title')).toHaveAttribute('placeholder', '(multiple values)')
+
+  await page.screenshot({ path: 'test-results/tag-editor-multi.png', animations: "disabled" })
+
+  const before = await page.evaluate(async () => {
+    const all = await window.resonance.library.getTracks()
+    return all
+      .filter((t) => t.path.includes('Attack on Titan'))
+      .map((t) => ({ path: t.path, title: t.title }))
+      .sort((a, b) => a.path.localeCompare(b.path))
+  })
+
+  await page.getByTestId('tag-album').fill('Attack on Titan')
+  await page.getByTestId('tag-save').click()
+  await expect(page.getByTestId('toast')).toContainText('Tagged 3 tracks')
+
+  const after = await page.evaluate(async () => {
+    const all = await window.resonance.library.getTracks()
+    return all
+      .filter((t) => t.path.includes('Attack on Titan'))
+      .map((t) => ({ path: t.path, title: t.title, album: t.album }))
+      .sort((a, b) => a.path.localeCompare(b.path))
+  })
+
+  expect(after.map((t) => t.album)).toEqual(['Attack on Titan', 'Attack on Titan', 'Attack on Titan'])
+  // The untouched, *mixed* field must be untouched on every file.
+  expect(after.map((t) => t.title)).toEqual(before.map((t) => t.title))
+})
+
+test('Fill from filename populates the form and writes nothing until Save', async () => {
+  await openEditorFor(UI_FILES[1]!)
+
+  const titleBefore = await page.getByTestId('tag-title').inputValue()
+  await page.getByTestId('fill-from-filename').click()
+
+  // The parser splits series from song around the OP marker.
+  await expect(page.getByTestId('tag-title')).toHaveValue('Jiyuu no Tsubasa')
+  await expect(page.getByTestId('tag-album')).toHaveValue('Attack on Titan')
+  await expect(page.getByTestId('tag-title')).not.toHaveValue(titleBefore)
+
+  await page.screenshot({ path: 'test-results/tag-editor-filled.png', animations: "disabled" })
+
+  /*
+   * The whole reason this is a button. Filename inference was reverted for
+   * writing guesses behind the user's back; cancelling here must leave the file
+   * exactly as it was.
+   */
+  const onDisk = await page.evaluate(async () => {
+    const all = await window.resonance.library.getTracks()
+    const t = all.find((x) => x.path.includes('Jiyuu no Tsubasa'))!
+    return (await window.resonance.tags.read([t.id]))[0]!.tags
+  })
+  await page.getByTestId('tag-editor-backdrop').click({ position: { x: 5, y: 5 } })
+
+  const afterCancel = await page.evaluate(async () => {
+    const all = await window.resonance.library.getTracks()
+    const t = all.find((x) => x.path.includes('Jiyuu no Tsubasa'))!
+    return (await window.resonance.tags.read([t.id]))[0]!.tags
+  })
+  expect(afterCancel).toEqual(onDisk)
+  expect(afterCancel!.title).not.toBe('Jiyuu no Tsubasa')
+})
+
+test('a filled form does write once Save is pressed', async () => {
+  await openEditorFor(UI_FILES[1]!)
+  await page.getByTestId('fill-from-filename').click()
+  await page.getByTestId('tag-save').click()
+
+  await expect
+    .poll(async () => (await tracksNamed('Jiyuu no Tsubasa.mp3'))[0]?.title)
+    .toBe('Jiyuu no Tsubasa')
 })
 
 test('a failed file does not stop the rest of the batch', async () => {

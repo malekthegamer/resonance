@@ -244,6 +244,34 @@ describe('backups', () => {
   })
 })
 
+describe('reading is sanitised', () => {
+  /*
+   * RIFF INFO strings are NUL-terminated and taglib returns the terminator, so
+   * a WAV title comes back as "Resonance Test Tone " while
+   * music-metadata — and therefore the database — reports it trimmed. The
+   * difference is invisible on screen and breaks every equality check that
+   * touches it, including "do these tracks share a title?" in the editor.
+   */
+  it('strips the NUL terminator off RIFF INFO values', () => {
+    const file = copyOf('wav', 'nul-terminated')
+    const [read] = readTags([file])
+
+    expect(read!.ok).toBe(true)
+    const title = read!.tags!.title
+    expect([...title].some((c) => c.charCodeAt(0) < 0x20)).toBe(false)
+    expect(title).toBe(title.trim())
+    expect(title).toBe('Resonance Test Tone')
+  })
+
+  it('leaves ordinary values untouched', () => {
+    const file = copyOf('mp3', 'clean-read')
+    const [read] = readTags([file])
+    expect(read!.tags!.title).toBe('Resonance Test Tone')
+    // Non-ASCII must survive sanitising; only control characters go.
+    expect(read!.tags!.artist).toBe('Test Artist 紅蓮')
+  })
+})
+
 describe('failure handling', () => {
   it('reports a missing file per-file instead of throwing', () => {
     const [result] = writeTags([join(WORK, 'does-not-exist.mp3')], NEW_TAGS, {
