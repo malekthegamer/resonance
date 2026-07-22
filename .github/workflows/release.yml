@@ -40,10 +40,28 @@ jobs:
         env:
           RESONANCE_DISABLE_UPDATER: '1'
 
-      # Publishes the installer AND latest.yml to the GitHub Release. Both are
-      # required: without latest.yml, installed copies cannot discover updates.
-      - name: Build and publish
-        run: npx electron-builder --win --publish always
+      # Built WITHOUT electron-builder's own publishing.
+      #
+      # Letting it publish created two draft releases for the same tag: the nsis
+      # and portable targets each raced to create one, so the assets were split
+      # across them. Drafts are also invisible to the public AND to
+      # electron-updater, so nothing could be downloaded or auto-updated.
+      - name: Build installers
+        run: npx electron-builder --win --publish never
+
+      # One explicit, published release with every asset attached. latest.yml is
+      # not optional: without it installed copies cannot discover updates.
+      - name: Publish release
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "release/Resonance-$VERSION-x64.exe" \
+            "release/Resonance-$VERSION-portable.exe" \
+            "release/latest.yml" \
+            --title "Resonance $VERSION" \
+            --generate-notes \
+            --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
