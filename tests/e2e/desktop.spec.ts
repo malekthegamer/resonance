@@ -209,3 +209,26 @@ test('Settings persists changes and lists shortcuts', async () => {
   await page.getByTestId('crossfade-slider').fill('0')
   await page.getByTestId('crossfade-slider').dispatchEvent('change')
 })
+
+test('the updater reports a clear state and never crashes the app', async () => {
+  await page.getByTestId('open-settings').click().catch(() => undefined)
+  if (!(await page.getByTestId('settings-panel').isVisible())) {
+    await page.getByTestId('open-settings').click()
+  }
+
+  await expect(page.getByTestId('update-row')).toBeVisible()
+
+  // In development the app is unpackaged, so updates are correctly reported as
+  // unavailable rather than silently failing or throwing.
+  const status = await page.evaluate(() => window.resonance.updates.status())
+  expect(['idle', 'disabled', 'checking', 'error']).toContain(status.state)
+
+  // A manual check must resolve rather than reject, even with no releases yet.
+  const checked = await page.evaluate(() => window.resonance.updates.check())
+  expect(checked.state).toBeTruthy()
+
+  // The app is still alive and usable afterwards.
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('nav-songs').click()
+  await expect(page.getByTestId('track-table')).toBeVisible()
+})

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Settings } from '@shared/types'
+import type { Settings, UpdateStatus } from '@shared/types'
 import type { ShortcutStatus } from '../../../main/shortcuts'
 import { IconClose } from './Icons'
 import { usePlayer } from '../state/player'
@@ -11,10 +11,30 @@ interface Props {
   onSettingsChanged(settings: Partial<Settings>): void
 }
 
+/** Plain-language status; version strings alone tell the user nothing. */
+function describeUpdate(u: UpdateStatus): string {
+  switch (u.state) {
+    case 'checking':
+      return 'Checking for updates…'
+    case 'downloading':
+      return `Downloading ${u.version ?? 'update'} — ${u.percent ?? 0}%`
+    case 'ready':
+      return `Version ${u.version} is ready to install`
+    case 'error':
+      return u.message ?? 'Update check failed'
+    case 'disabled':
+      return u.message ?? 'Updates are disabled'
+    default:
+      return 'Resonance is up to date'
+  }
+}
+
 export function SettingsPanel({ onClose, onSettingsChanged }: Props): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [shortcuts, setShortcuts] = useState<ShortcutStatus[]>([])
   const [, forceTick] = useState(0)
+  // Named updateStatus, not update — there is already an update() helper here.
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: 'idle' })
   const sleep = usePlayer((s) => s.sleep)
   const setSleepMinutes = usePlayer((s) => s.setSleepMinutes)
   const setSleepEndOfTrack = usePlayer((s) => s.setSleepEndOfTrack)
@@ -30,6 +50,8 @@ export function SettingsPanel({ onClose, onSettingsChanged }: Props): React.JSX.
   useEffect(() => {
     void window.resonance.settings.getAll().then(setSettings)
     void window.resonance.desktop.shortcutStatus().then(setShortcuts)
+    void window.resonance.updates.status().then(setUpdateStatus)
+    return window.resonance.updates.onStatus(setUpdateStatus)
   }, [])
 
   async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
@@ -151,6 +173,36 @@ export function SettingsPanel({ onClose, onSettingsChanged }: Props): React.JSX.
               data-testid="show-visualizer"
             />
           </label>
+        </section>
+
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Updates</h3>
+          <div className={styles.updateRow} data-testid="update-row">
+            <span className={styles.updateText}>{describeUpdate(updateStatus)}</span>
+            {updateStatus.state === 'ready' ? (
+              <button
+                className={styles.updateBtn}
+                onClick={() => void window.resonance.updates.install()}
+                data-testid="update-install"
+              >
+                Restart &amp; install
+              </button>
+            ) : (
+              <button
+                className={styles.updateBtn}
+                disabled={updateStatus.state === 'checking' || updateStatus.state === 'downloading'}
+                onClick={() => void window.resonance.updates.check().then(setUpdateStatus)}
+                data-testid="update-check"
+              >
+                Check now
+              </button>
+            )}
+          </div>
+          {updateStatus.state === 'downloading' && (
+            <div className={styles.updateTrack}>
+              <div className={styles.updateFill} style={{ width: `${updateStatus.percent ?? 0}%` }} />
+            </div>
+          )}
         </section>
 
         <section className={styles.section}>

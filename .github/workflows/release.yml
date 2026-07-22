@@ -1,0 +1,59 @@
+name: Release
+
+# Publishing is driven by tags, so cutting a release is `npm version patch`
+# followed by a push. Nothing is built or published from ordinary commits.
+on:
+  push:
+    tags:
+      - 'v*'
+  # Lets you re-run a release from the Actions tab without moving the tag.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # The e2e suite drives a real Electron window, which needs a desktop
+      # session; windows-latest runners provide one.
+      - name: End-to-end tests
+        run: npm run test:e2e
+        env:
+          RESONANCE_DISABLE_UPDATER: '1'
+
+      # Publishes the installer AND latest.yml to the GitHub Release. Both are
+      # required: without latest.yml, installed copies cannot discover updates.
+      - name: Build and publish
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resonance-windows
+          path: |
+            release/*.exe
+            release/latest.yml
+          if-no-files-found: warn
+          retention-days: 14

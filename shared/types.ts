@@ -141,6 +141,14 @@ export interface Settings {
   miniPlayerPosition: { x: number; y: number } | null
 }
 
+/** Auto-update progress, surfaced in Settings. */
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'downloading' | 'ready' | 'error' | 'disabled'
+  version?: string
+  percent?: number
+  message?: string
+}
+
 /** Broadcast to the tray and mini-player whenever playback state changes. */
 export interface NowPlayingState {
   trackId: number | null

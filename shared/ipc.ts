@@ -64,6 +64,12 @@ export const IPC = {
   // Desktop integration
   SHORTCUT_STATUS: 'shortcuts:status',
 
+  // Auto-update
+  UPDATE_STATUS: 'update:status',
+  UPDATE_STATUS_GET: 'update:statusGet',
+  UPDATE_CHECK: 'update:check',
+  UPDATE_INSTALL: 'update:install',
+
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set'

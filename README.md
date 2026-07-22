@@ -20,6 +20,22 @@ Electron + React + TypeScript. Frameless glass UI on a fixed blue→purple ident
 
 **Conveniences** — full session restore (queue, track, position, volume, EQ, theme, window geometry), crossfade, sleep timer, live folder watching, play counts, and a Properties dialog.
 
+## Install
+
+Download the latest **`Resonance-x.y.z-x64.exe`** from the
+[Releases page](../../releases) and run it.
+
+Windows SmartScreen will warn on first run because the build is not code-signed
+— choose **More info → Run anyway**. There is also a portable build
+(`Resonance-x.y.z-portable.exe`) that needs no installation.
+
+Resonance updates itself: it checks GitHub Releases on launch, downloads new
+versions in the background, and installs them when you next close the app.
+You can also check manually in **Settings → Updates**.
+
+Uninstalling deliberately leaves your library and playlists in
+`%APPDATA%\Resonance`.
+
 ---
 
 ## Requirements
@@ -60,8 +76,8 @@ Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
 ## Testing
 
 ```bash
-npm test          # Vitest — pure logic (162 tests)
-npm run test:e2e  # builds, then drives the real Electron app (64 tests)
+npm test          # Vitest — pure logic (154 tests)
+npm run test:e2e  # builds, then drives the real Electron app (76 tests)
 ```
 
 Audio fixtures are **generated**, not committed — `tests/fixtures/gen-audio.ts` synthesizes tagged FLAC/M4A/OGG/Opus/WAV/MP3 from a tone via `ffmpeg-static`, plus a ~112 MB file for range-seek testing. First run takes a few seconds; afterwards they are reused.
@@ -86,11 +102,39 @@ The installer is **not code-signed**, so Windows SmartScreen will warn on first 
 
 Uninstalling deliberately **leaves your library and settings** in `%APPDATA%\Resonance`. Deleting playlists and play counts because someone updated the app would be hostile.
 
+## Publishing a new version
+
+Releases are driven by tags. One command does the whole thing:
+
+```bash
+npm run release -- patch    # 0.1.0 -> 0.1.1   bug fixes
+npm run release -- minor    # 0.1.0 -> 0.2.0   new features
+npm run release -- major    # 0.1.0 -> 1.0.0   breaking changes
+```
+
+That bumps the version, tags it and pushes. GitHub Actions then runs the full
+test suite, builds the Windows installer, and publishes it to a GitHub Release.
+Installed copies pick the update up on their next launch.
+
+It refuses to run on a dirty working tree — a release built from uncommitted
+changes cannot be reproduced from its tag.
+
+**First-time setup** (once, before the first push):
+
+```bash
+npm run setup-github -- <your-github-username>
+```
+
+This rewrites the commit history to use a GitHub noreply email instead of your
+real one, points `repository` in `package.json` at the new repo (which is where
+auto-update looks), and adds the `origin` remote. It refuses to run once a
+remote exists, because rewriting published history breaks every clone.
+
 ---
 
 ## No native modules
 
-The spec originally called for `better-sqlite3`, which must compile against Electron's Node ABI. **This machine has Visual Studio 2022 with the VC++ components registered but no `MSBuild.exe` installed at all**, so no native module can be built here.
+Resonance was originally specified to use `better-sqlite3`, which must compile against Electron's Node ABI and therefore needs a working C++ toolchain. It was developed on a machine where Visual Studio 2022 registered the VC++ components but shipped no `MSBuild.exe`, so nothing native could be built at all — a situation that is easy to land in and miserable to debug.
 
 Resonance therefore uses **`node:sqlite`**, built into Electron's bundled Node. Verified inside Electron 43.2.0 — and again inside the *packaged* build: SQLite 3.53.1, prepared statements, bulk transactions, named parameters, WAL, and FTS5.
 
@@ -102,7 +146,7 @@ Consequences:
 
 - **No rebuild step exists**, so there is none to document. `@electron/rebuild` is not a dependency and `npmRebuild` is off.
 - Every remaining runtime dependency (`music-metadata`, `chokidar`, `electron-store`) is pure JavaScript, which makes packaging considerably more reliable.
-- If you later install the "Desktop development with C++" workload **including MSBuild** and want `better-sqlite3` back, the database layer is isolated behind `src/main/db/index.ts` — the swap is one file.
+- If you have the "Desktop development with C++" workload **including MSBuild** and want `better-sqlite3` back, the database layer is isolated behind `src/main/db/index.ts` — the swap is one file.
 
 Full reasoning and the diagnosis trail are in [PLAN.md](PLAN.md) §A7.
 

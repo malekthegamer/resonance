@@ -4,6 +4,7 @@ import type {
   AppInfo,
   DbInfo,
   NowPlayingState,
+  UpdateStatus,
   ScanProgress,
   Settings,
   Track
@@ -137,6 +138,17 @@ const api = {
     isMiniPlayerOpen: (): Promise<boolean> => ipcRenderer.invoke(IPC.MINI_IS_OPEN),
     closeMiniPlayer: (): void => ipcRenderer.send(IPC.MINI_CLOSE),
     shortcutStatus: (): Promise<ShortcutStatus[]> => ipcRenderer.invoke(IPC.SHORTCUT_STATUS)
+  },
+
+  updates: {
+    status: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.UPDATE_STATUS_GET),
+    check: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.UPDATE_CHECK),
+    install: (): Promise<void> => ipcRenderer.invoke(IPC.UPDATE_INSTALL),
+    onStatus: (cb: (s: UpdateStatus) => void): (() => void) => {
+      const listener = (_e: unknown, s: UpdateStatus): void => cb(s)
+      ipcRenderer.on(IPC.UPDATE_STATUS, listener)
+      return () => ipcRenderer.removeListener(IPC.UPDATE_STATUS, listener)
+    }
   },
 
   settings: {

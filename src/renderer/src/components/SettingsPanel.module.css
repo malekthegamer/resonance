@@ -195,3 +195,54 @@
   background-clip: text;
   color: transparent;
 }
+
+.updateRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.updateText {
+  font-size: 12.5px;
+  color: var(--text-mid);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.updateBtn {
+  flex: none;
+  padding: 6px 13px;
+  border-radius: 99px;
+  font-size: 12px;
+  color: var(--text-mid);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border-strong);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.updateBtn:hover:not(:disabled) {
+  color: var(--text-hi);
+  background: var(--glass-bg-strong);
+}
+
+.updateBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.updateTrack {
+  margin-top: 9px;
+  height: 4px;
+  border-radius: 99px;
+  background: rgb(255 255 255 / 0.12);
+  overflow: hidden;
+}
+
+.updateFill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent-grad-h);
+  transition: width 160ms linear;
+}

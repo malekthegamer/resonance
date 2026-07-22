@@ -5,6 +5,11 @@
   "main": "./out/main/index.js",
   "author": "malek",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_GITHUB_USERNAME/resonance.git"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -15,7 +20,9 @@
     "test:e2e": "npm run build && playwright test",
     "probe:sqlite": "electron ./scripts/probe-sqlite.cjs",
     "dist": "npm run build && electron-builder --win",
-    "dist:dir": "npm run build && electron-builder --win --dir"
+    "dist:dir": "npm run build && electron-builder --win --dir",
+    "release": "node scripts/release.mjs",
+    "setup-github": "node scripts/setup-github.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
@@ -38,6 +45,7 @@
     "@tanstack/react-virtual": "^3.14.7",
     "chokidar": "^5.0.0",
     "electron-store": "^11.0.2",
+    "electron-updater": "^6.8.9",
     "framer-motion": "^12.42.2",
     "music-metadata": "^11.14.0",
     "react": "^19.2.8",

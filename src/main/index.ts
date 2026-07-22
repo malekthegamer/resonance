@@ -8,6 +8,7 @@ import { closeDb, getDb, getDbInfo } from './db/open'
 import { registerLibraryIpc } from './ipc/library'
 import { registerPlaylistIpc } from './ipc/playlists'
 import { registerDesktopIpc } from './ipc/desktop'
+import { setupUpdater } from './updater'
 import { createTray, destroyTray } from './tray'
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './shortcuts'
 import { closeMiniPlayer } from './windows/mini'
@@ -64,6 +65,7 @@ if (!app.requestSingleInstanceLock()) {
     registerLibraryIpc()
     registerPlaylistIpc()
     registerDesktopIpc()
+    setupUpdater()
     createMainWindow()
     createTray()
 

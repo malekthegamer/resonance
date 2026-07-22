@@ -1,3 +1,9 @@
+# The GitHub repo is taken from `repository` in package.json, so there is no
+# owner/name duplicated here to drift out of sync. electron-builder bakes it
+# into app-update.yml, which is how installed copies find new releases.
+publish:
+  provider: github
+
 appId: com.resonance.player
 productName: Resonance
 copyright: Copyright © 2026 malek
