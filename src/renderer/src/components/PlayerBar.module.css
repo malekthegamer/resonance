@@ -1,0 +1,237 @@
+.bar {
+  flex: none;
+  position: relative;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(150%);
+}
+
+.inner {
+  height: var(--playerbar-h);
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(340px, 2.1fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+}
+
+/* ---- now playing ---- */
+
+.nowPlaying {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  text-align: left;
+  padding: 6px;
+  margin: -6px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.nowPlaying:hover {
+  background: var(--row-hover);
+}
+
+.meta {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--text-lo);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- transport ---- */
+
+.center {
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctl {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: var(--text-mid);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.ctl:hover {
+  color: var(--text-hi);
+  background: var(--row-hover);
+}
+
+/*
+ * Active toggles use the identity accent. background-clip:text was tried first
+ * and does nothing to an SVG stroke — the icon simply vanished. A solid accent
+ * colour plus a dot beneath reads clearly at 15px.
+ */
+.on {
+  color: var(--accent-a);
+  position: relative;
+}
+
+.on:hover {
+  color: var(--accent-b);
+}
+
+.on::after {
+  content: '';
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-grad-h);
+}
+
+.play {
+  width: 42px;
+  height: 42px;
+  margin: 0 4px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent-grad);
+  box-shadow: 0 6px 20px rgb(var(--accent-b-rgb) / 0.45);
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+
+.play:hover {
+  filter: brightness(1.1);
+}
+
+/* ---- progress ---- */
+
+.progressRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.time {
+  font-size: 11px;
+  color: var(--text-lo);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: center;
+}
+
+.progress {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.progressTrack {
+  position: relative;
+  height: 4px;
+  border-radius: 99px;
+  background: rgb(255 255 255 / 0.12);
+}
+
+:root[data-theme='light'] .progressTrack {
+  background: rgb(16 18 34 / 0.12);
+}
+
+.buffered {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 99px;
+  background: rgb(255 255 255 / 0.16);
+}
+
+.progressFill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent-grad-h);
+}
+
+.knob {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.5);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.progress:hover .knob,
+.progress:focus-visible .knob {
+  opacity: 1;
+}
+
+/* ---- right cluster ---- */
+
+.right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.volume {
+  width: 88px;
+  margin-left: 4px;
+  accent-color: var(--accent-b);
+  cursor: pointer;
+}
+
+/* ---- error toast ---- */
+
+.error {
+  position: absolute;
+  top: -42px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  color: #fff;
+  background: rgb(190 40 60 / 0.94);
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+}

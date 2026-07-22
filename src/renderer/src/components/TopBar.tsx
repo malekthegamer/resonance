@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { Theme } from '@shared/types'
 import { useLibrary } from '../state/library'
+import { IconMoon, IconSearch, IconSun } from './Icons'
 import styles from './TopBar.module.css'
 
 interface Props {
@@ -51,7 +52,7 @@ export function TopBar({ title, subtitle, onBack, theme, onToggleTheme }: Props)
 
       <div className={styles.searchWrap}>
         <span className={styles.searchIcon} aria-hidden>
-          ⌕
+          <IconSearch size={15} />
         </span>
         <input
           ref={inputRef}
@@ -72,7 +73,7 @@ export function TopBar({ title, subtitle, onBack, theme, onToggleTheme }: Props)
         aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
       >
-        {theme === 'dark' ? '☀' : '☾'}
+        {theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
       </button>
     </header>
   )

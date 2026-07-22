@@ -67,9 +67,9 @@
 
 .icon {
   width: 18px;
-  text-align: center;
-  opacity: 0.85;
-  font-size: 13px;
+  display: grid;
+  place-items: center;
+  opacity: 0.9;
 }
 
 .spacer {
@@ -77,6 +77,10 @@
 }
 
 .addBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   margin: 0 2px 8px;
   padding: 10px 14px;
   border-radius: 99px;

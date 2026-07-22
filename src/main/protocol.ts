@@ -1,5 +1,7 @@
-import { pathToFileURL } from 'node:url'
-import { net, protocol } from 'electron'
+import { createReadStream, statSync } from 'node:fs'
+import { extname } from 'node:path'
+import { Readable } from 'node:stream'
+import { protocol } from 'electron'
 import { getDb } from './db/open'
 import { getTrackById } from './db/tracks'
 import { artCacheDir } from './scan/controller'
@@ -61,23 +63,98 @@ function notFound(): Response {
   return new Response('Not found', { status: 404 })
 }
 
-/** Serves a real file through net.fetch, which preserves byte-range support. */
-async function serveFile(absPath: string, request: Request): Promise<Response> {
-  const upstream = await net.fetch(pathToFileURL(absPath).toString(), {
-    headers: request.headers,
-    // Range headers must survive to the file handler or seeking breaks.
-    bypassCustomProtocolHandlers: true
+const MIME_BY_EXT: Readonly<Record<string, string>> = {
+  '.mp3': 'audio/mpeg',
+  '.flac': 'audio/flac',
+  '.wav': 'audio/wav',
+  '.wave': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.m4b': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.mp4': 'audio/mp4',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.wma': 'audio/x-ms-wma',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp'
+}
+
+/**
+ * Serves a file with explicit byte-range support.
+ *
+ * Range handling is implemented here rather than delegated, because delegating
+ * did not reliably set `Content-Length`. Without it Chromium cannot determine a
+ * media file's duration: `el.duration` stays `Infinity`, the seek bar has no
+ * scale, and seeking is impossible — on a 112 MB file that presented as
+ * "duration 0" while playback ran perfectly happily.
+ *
+ * `Accept-Ranges` plus a correct 206 `Content-Range` is what makes seeking into
+ * a large file work at all, rather than forcing a download of everything before
+ * the target.
+ */
+function serveFile(absPath: string, request: Request): Response {
+  let size: number
+  try {
+    const info = statSync(absPath)
+    if (!info.isFile()) return notFound()
+    size = info.size
+  } catch {
+    return notFound()
+  }
+
+  const contentType = MIME_BY_EXT[extname(absPath).toLowerCase()] ?? 'application/octet-stream'
+  const headers = new Headers({
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    // Required for Web Audio: a cross-origin media element that is not
+    // CORS-approved feeds the analyser silence (plan §A2b).
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-cache'
   })
 
-  const headers = new Headers(upstream.headers)
-  headers.set('Access-Control-Allow-Origin', '*')
-  headers.set('Cache-Control', 'no-cache')
+  const range = request.headers.get('Range')
+  const match = range?.match(/^bytes=(\d*)-(\d*)$/)
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers
-  })
+  if (match) {
+    const startRaw = match[1]
+    const endRaw = match[2]
+
+    let start: number
+    let end: number
+    if (startRaw === '' && endRaw !== '') {
+      // Suffix form: "bytes=-500" means the final 500 bytes.
+      const suffix = Number(endRaw)
+      start = Math.max(0, size - suffix)
+      end = size - 1
+    } else {
+      start = Number(startRaw || 0)
+      end = endRaw ? Number(endRaw) : size - 1
+    }
+
+    if (!Number.isFinite(start) || start >= size || start < 0) {
+      headers.set('Content-Range', `bytes */${size}`)
+      return new Response(null, { status: 416, headers })
+    }
+    end = Math.min(end, size - 1)
+    const length = end - start + 1
+
+    headers.set('Content-Range', `bytes ${start}-${end}/${size}`)
+    headers.set('Content-Length', String(length))
+
+    const stream = Readable.toWeb(
+      createReadStream(absPath, { start, end })
+    ) as unknown as ReadableStream
+    return new Response(stream, { status: 206, headers })
+  }
+
+  headers.set('Content-Length', String(size))
+  const stream = Readable.toWeb(createReadStream(absPath)) as unknown as ReadableStream
+  return new Response(stream, { status: 200, headers })
 }
 
 export function registerProtocolHandlers(): void {
@@ -89,7 +166,7 @@ export function registerProtocolHandlers(): void {
     const abs = resolveArtPath(artCacheDir(), ref)
     if (!abs) return notFound()
     try {
-      return await serveFile(abs, request)
+      return serveFile(abs, request)
     } catch {
       return notFound()
     }
@@ -104,7 +181,7 @@ export function registerProtocolHandlers(): void {
     if (!track) return notFound()
 
     try {
-      return await serveFile(track.path, request)
+      return serveFile(track.path, request)
     } catch {
       // File moved or deleted since the scan. Mark it rather than crash playback.
       getDb().run('UPDATE tracks SET available = 0 WHERE id = ?', [id])

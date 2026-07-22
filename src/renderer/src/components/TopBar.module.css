@@ -61,7 +61,8 @@
 .searchIcon {
   position: absolute;
   left: 11px;
-  font-size: 14px;
+  display: grid;
+  place-items: center;
   color: var(--text-lo);
   pointer-events: none;
 }

@@ -6,6 +6,9 @@ import { TopBar } from './components/TopBar'
 import { TrackTable } from './components/TrackTable'
 import { AlbumGrid, SimpleGrid } from './components/CardGrid'
 import { ScanBanner } from './components/ScanBanner'
+import { PlayerBar } from './components/PlayerBar'
+import { usePlayer } from './state/player'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import {
   albumKeyFor,
   artistKeyFor,
@@ -30,17 +33,25 @@ const VIEW_TITLES: Record<string, string> = {
 export default function App(): React.JSX.Element {
   const [theme, setTheme] = useState<Theme>('dark')
   const [dragging, setDragging] = useState(false)
+  /** Which side panel is open, if any. Populated across slices 5 and 6. */
+  const [panel, setPanel] = useState<'queue' | 'eq' | 'now' | null>(null)
 
   const {
     tracks, view, focus, query, searchResults, sortKey, sortDir,
     load, setFocus, setScan, scanPaths
   } = useLibrary()
 
+  const playTracks = usePlayer((s) => s.playTracks)
+  const initPlayer = usePlayer((s) => s.init)
+  const currentTrack = usePlayer((s) => s.current)
+  useKeyboardShortcuts()
+
   useEffect(() => {
     void load()
+    initPlayer()
     void window.resonance.settings.getAll().then((s) => setTheme(s.theme))
     return window.resonance.library.onScanProgress(setScan)
-  }, [load, setScan])
+  }, [load, setScan, initPlayer])
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
@@ -147,10 +158,21 @@ export default function App(): React.JSX.Element {
               />
             )
           ) : (
-            <TrackTable tracks={visibleTracks} showArt={!focus || focus.kind !== 'album'} />
+            <TrackTable
+              tracks={visibleTracks}
+              showArt={!focus || focus.kind !== 'album'}
+              onPlay={(list, index) => void playTracks(list, index)}
+              currentTrackId={currentTrack?.id ?? null}
+            />
           )}
         </main>
       </div>
+
+      <PlayerBar
+        onOpenQueue={() => setPanel(panel === 'queue' ? null : 'queue')}
+        onOpenEq={() => setPanel(panel === 'eq' ? null : 'eq')}
+        onOpenNowPlaying={() => setPanel(panel === 'now' ? null : 'now')}
+      />
 
       {dragging && (
         <div className={styles.dropOverlay} data-testid="drop-overlay">

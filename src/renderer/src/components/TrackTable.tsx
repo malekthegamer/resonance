@@ -20,6 +20,8 @@ interface Props {
   tracks: Track[]
   /** Hidden when a grid already establishes the album context. */
   showArt?: boolean
+  onPlay?(tracks: Track[], index: number): void
+  currentTrackId?: number | null
 }
 
 /**
@@ -29,7 +31,12 @@ interface Props {
  * to render as a 50-track one — rendering every row is the usual reason a
  * library view janks on scroll.
  */
-export function TrackTable({ tracks, showArt = true }: Props): React.JSX.Element {
+export function TrackTable({
+  tracks,
+  showArt = true,
+  onPlay,
+  currentTrackId
+}: Props): React.JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null)
   const sortKey = useLibrary((s) => s.sortKey)
   const sortDir = useLibrary((s) => s.sortDir)
@@ -84,12 +91,30 @@ export function TrackTable({ tracks, showArt = true }: Props): React.JSX.Element
             return (
               <div
                 key={track.id}
-                className={`${styles.row} ${track.available ? '' : styles.unavailable}`}
+                className={`${styles.row} ${track.available ? '' : styles.unavailable} ${
+                  currentTrackId === track.id ? styles.current : ''
+                }`}
                 style={{ transform: `translateY(${item.start}px)`, height: item.size }}
                 data-testid="track-row"
+                data-track-id={track.id}
                 role="row"
+                tabIndex={0}
+                onDoubleClick={() => onPlay?.(tracks, item.index)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onPlay?.(tracks, item.index)
+                }}
               >
-                <span className={styles.colIndex}>{item.index + 1}</span>
+                <span className={styles.colIndex}>
+                  {currentTrackId === track.id ? (
+                    <span className={styles.eq} aria-label="Now playing">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  ) : (
+                    item.index + 1
+                  )}
+                </span>
                 {showArt && (
                   <span className={styles.colArt}>
                     <AlbumArt artRef={track.artRef} seed={track.album || track.title} size={32} radius={6} />

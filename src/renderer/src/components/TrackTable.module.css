@@ -110,6 +110,62 @@
   opacity: 0.45;
 }
 
+/* Active-track highlight uses the fixed identity accent (plan §A4). */
+.current {
+  background: var(--row-active);
+}
+
+.current .title {
+  color: transparent;
+  background: var(--accent-grad-h);
+  -webkit-background-clip: text;
+  background-clip: text;
+  font-weight: 600;
+}
+
+/* Three animated bars in place of the row number while a track plays. */
+.eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+
+.eq i {
+  width: 2.5px;
+  border-radius: 1px;
+  background: var(--accent-b);
+  animation: bounce 900ms var(--ease-in-out) infinite;
+}
+
+.eq i:nth-child(1) {
+  height: 60%;
+  animation-delay: -200ms;
+}
+.eq i:nth-child(2) {
+  height: 100%;
+  animation-delay: -520ms;
+}
+.eq i:nth-child(3) {
+  height: 45%;
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eq i {
+    animation: none;
+  }
+}
+
 .badge {
   margin-left: 8px;
   padding: 1px 6px;
