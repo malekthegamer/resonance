@@ -25,6 +25,11 @@ if (!['patch', 'minor', 'major'].includes(kind)) {
 }
 
 const root = resolve(import.meta.dirname, '..')
+
+// On Windows npm is a .cmd shim, and execFileSync without a shell cannot
+// resolve it — it fails with ENOENT on a plain "npm".
+const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
 const run = (cmd, args) =>
   execFileSync(cmd, args, { cwd: root, encoding: 'utf8', stdio: 'pipe' }).trim()
 
@@ -54,7 +59,7 @@ console.log(`Current version: ${pkg.version}`)
 
 // --- bump, tag, push --------------------------------------------------------
 // `npm version` creates the commit and the vX.Y.Z tag in one step.
-const tag = run('npm', ['version', kind, '-m', 'Release %s'])
+const tag = run(NPM, ['version', kind, '-m', 'Release %s'])
 console.log(`New version:     ${tag}`)
 
 const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
