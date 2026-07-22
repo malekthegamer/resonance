@@ -8,6 +8,8 @@ import { AlbumGrid, SimpleGrid } from './components/CardGrid'
 import { ScanBanner } from './components/ScanBanner'
 import { PlayerBar } from './components/PlayerBar'
 import { QueuePanel } from './components/QueuePanel'
+import { EqualizerPanel } from './components/EqualizerPanel'
+import { NowPlaying } from './components/NowPlaying'
 import { ContextMenu, type MenuItem } from './components/ContextMenu'
 import { TrackProperties } from './components/TrackProperties'
 import { Toast } from './components/Toast'
@@ -24,6 +26,7 @@ import { sortTracks } from './core/sort'
 import { useLibrary } from './state/library'
 import { usePlayer } from './state/player'
 import { usePlaylists } from './state/playlists'
+import { useEq } from './state/eq'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import styles from './App.module.css'
 
@@ -48,6 +51,7 @@ export default function App(): React.JSX.Element {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [properties, setProperties] = useState<Track | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [showVisualizer, setShowVisualizer] = useState(true)
 
   const {
     tracks, view, focus, query, searchResults, sortKey, sortDir,
@@ -58,6 +62,7 @@ export default function App(): React.JSX.Element {
   const initPlayer = usePlayer((s) => s.init)
   const currentTrack = usePlayer((s) => s.current)
   const playNextTracks = usePlayer((s) => s.playNext)
+  const hydrateEq = useEq((s) => s.hydrate)
   const addToQueue = usePlayer((s) => s.addToQueue)
   useKeyboardShortcuts()
 
@@ -72,9 +77,13 @@ export default function App(): React.JSX.Element {
     void load()
     initPlayer()
     void refreshPlaylists()
-    void window.resonance.settings.getAll().then((s) => setTheme(s.theme))
+    void hydrateEq()
+    void window.resonance.settings.getAll().then((s) => {
+      setTheme(s.theme)
+      setShowVisualizer(s.showVisualizer ?? true)
+    })
     return window.resonance.library.onScanProgress(setScan)
-  }, [load, setScan, initPlayer, refreshPlaylists])
+  }, [load, setScan, initPlayer, refreshPlaylists, hydrateEq])
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
@@ -262,6 +271,18 @@ export default function App(): React.JSX.Element {
         />
 
         <main className={styles.content}>
+          {panel === 'now' ? (
+            <NowPlaying
+              onClose={() => setPanel(null)}
+              showVisualizer={showVisualizer}
+              onToggleVisualizer={() => {
+                const next = !showVisualizer
+                setShowVisualizer(next)
+                void window.resonance.settings.set('showVisualizer', next)
+              }}
+            />
+          ) : (
+          <>
           <TopBar
             title={title}
             subtitle={subtitle}
@@ -306,9 +327,12 @@ export default function App(): React.JSX.Element {
               }}
             />
           )}
+          </>
+          )}
         </main>
 
         {panel === 'queue' && <QueuePanel onClose={() => setPanel(null)} />}
+        {panel === 'eq' && <EqualizerPanel onClose={() => setPanel(null)} />}
       </div>
 
       <PlayerBar

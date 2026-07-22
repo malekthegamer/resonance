@@ -75,6 +75,108 @@ export function initialsFor(name: string): string {
   return (chosen[0]![0]! + chosen[chosen.length - 1]![0]!).toUpperCase()
 }
 
+/**
+ * Extracts a clamped dominant-colour pair from artwork, for the Now Playing
+ * aurora wash (plan §A4).
+ *
+ * Saturation and lightness are clamped hard. A vivid red cover would otherwise
+ * flood the frame and fight the fixed blue→purple identity; the aurora is meant
+ * to be a hint of the artwork behind the art, not a repaint of the app. This is
+ * also confined to Now Playing — it never touches the sidebar, player bar, or
+ * global background.
+ */
+export interface AuroraColors {
+  from: string
+  to: string
+}
+
+const AURORA_MAX_SATURATION = 0.55
+const AURORA_LIGHTNESS_MIN = 0.28
+const AURORA_LIGHTNESS_MAX = 0.55
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255
+  const gn = g / 255
+  const bn = b / 255
+  const max = Math.max(rn, gn, bn)
+  const min = Math.min(rn, gn, bn)
+  const l = (max + min) / 2
+  if (max === min) return [0, 0, l]
+
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h: number
+  if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6
+  else if (max === gn) h = ((bn - rn) / d + 2) / 6
+  else h = ((rn - gn) / d + 4) / 6
+  return [h * 360, s, l]
+}
+
+/**
+ * Samples a already-loaded image element. Returns null when the image cannot be
+ * read — a tainted canvas throws, and the caller must fall back to the identity
+ * gradient rather than showing nothing.
+ */
+export function auroraFromImage(img: HTMLImageElement): AuroraColors | null {
+  try {
+    const size = 24 // Downsampled: exact pixels do not matter, the average does.
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+    ctx.drawImage(img, 0, 0, size, size)
+    const { data } = ctx.getImageData(0, 0, size, size)
+
+    let rSum = 0
+    let gSum = 0
+    let bSum = 0
+    let count = 0
+    let bestSat = -1
+    let accent: [number, number, number] = [0, 0, 0]
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i]!
+      const g = data[i + 1]!
+      const b = data[i + 2]!
+      const a = data[i + 3]!
+      if (a < 128) continue
+
+      rSum += r
+      gSum += g
+      bSum += b
+      count++
+
+      const [, s, l] = rgbToHsl(r, g, b)
+      // Ignore near-black and near-white when picking the accent; they carry no
+      // usable hue and would drag the wash toward grey.
+      if (l > 0.2 && l < 0.85 && s > bestSat) {
+        bestSat = s
+        accent = [r, g, b]
+      }
+    }
+
+    if (count === 0) return null
+
+    const avg = rgbToHsl(rSum / count, gSum / count, bSum / count)
+    const acc = bestSat >= 0 ? rgbToHsl(accent[0], accent[1], accent[2]) : avg
+
+    const clamp = (hsl: [number, number, number]): string => {
+      const h = Math.round(hsl[0])
+      const s = Math.round(Math.min(hsl[1], AURORA_MAX_SATURATION) * 100)
+      const l = Math.round(
+        Math.min(AURORA_LIGHTNESS_MAX, Math.max(AURORA_LIGHTNESS_MIN, hsl[2])) * 100
+      )
+      return `hsl(${h} ${s}% ${l}%)`
+    }
+
+    return { from: clamp(acc), to: clamp(avg) }
+  } catch {
+    // Cross-origin taint or a zero-size image.
+    return null
+  }
+}
+
 /** Builds the resonance-art:// URL for a stored art reference. */
 export function artUrl(ref: string | null | undefined): string | null {
   if (!ref) return null

@@ -106,9 +106,38 @@ export interface WindowState {
   isMaximized: boolean
 }
 
+export interface EqPresetData {
+  name: string
+  gains: number[]
+  builtIn: boolean
+}
+
+export interface EqSettings {
+  enabled: boolean
+  gains: number[]
+  customPresets: EqPresetData[]
+}
+
+/** Everything needed to restore a listening session on relaunch. */
+export interface SessionState {
+  queue: number[]
+  index: number
+  positionSec: number
+  shuffle: boolean
+  repeat: 'off' | 'all' | 'one'
+}
+
 export interface Settings {
   theme: Theme
   windowState: WindowState
+  eq: EqSettings
+  volume: number
+  muted: boolean
+  session: SessionState | null
+  crossfadeSec: number
+  minimizeToTray: boolean
+  showVisualizer: boolean
+  watchFolders: boolean
 }
 
 export const DEFAULT_WINDOW_STATE: WindowState = {
@@ -119,5 +148,15 @@ export const DEFAULT_WINDOW_STATE: WindowState = {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
-  windowState: DEFAULT_WINDOW_STATE
+  windowState: DEFAULT_WINDOW_STATE,
+  eq: { enabled: true, gains: new Array(10).fill(0), customPresets: [] },
+  volume: 1,
+  muted: false,
+  session: null,
+  // Crossfade defaults to off: it changes how every track transition sounds, so
+  // it should be something the user opts into.
+  crossfadeSec: 0,
+  minimizeToTray: true,
+  showVisualizer: true,
+  watchFolders: true
 }
