@@ -52,8 +52,7 @@ function writeVersion(file, version, alsoRootPackage) {
   const json = JSON.parse(readFileSync(file, 'utf8'))
   json.version = version
   if (alsoRootPackage && json.packages?.['']) json.packages[''].version = version
-  writeFileSync(file, JSON.stringify(json, null, 2) + '
-')
+  writeFileSync(file, JSON.stringify(json, null, 2) + '\n')
 }
 
 // --- preflight --------------------------------------------------------------
