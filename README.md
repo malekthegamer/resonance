@@ -2,18 +2,32 @@
 
 A modern desktop music player for Windows — a reimagining of Windows Media Player, focused purely on music.
 
-Electron + React + TypeScript, frameless glass UI on a fixed blue→purple identity.
+Electron + React + TypeScript. Frameless glass UI on a fixed blue→purple identity, a real SQLite library, and a Web Audio engine with a 10-band equalizer.
 
-> **Status: slice 0 of 10 complete** (scaffold & spine). See [PLAN.md](PLAN.md) for the full staged build plan, the amendment log, and the gate results.
+---
+
+## Features
+
+**Library** — scan folders or drag files/folders onto the window. Browse by Songs, Albums, Artists, Genres and Recently Added. Virtualized lists, sortable columns, and instant full-text search across title/artist/album.
+
+**Playback** — play/pause/stop/next/previous, draggable seek with buffered indication, volume and mute, shuffle, and repeat (off / all / one). Supports MP3, FLAC, WAV, M4A/AAC, OGG and Opus.
+
+**Queue & playlists** — reorderable Now Playing queue, playlist CRUD with persisted drag order, and M3U/M3U8 import and export.
+
+**Equalizer** — ten bands (31 Hz – 16 kHz, ±12 dB) with eleven presets, custom preset save, and a bypass toggle. Changes are audible while you drag.
+
+**Desktop integration** — system tray with quick controls and a now-playing tooltip, global media keys, an always-on-top mini-player, and minimize-to-tray.
+
+**Conveniences** — full session restore (queue, track, position, volume, EQ, theme, window geometry), crossfade, sleep timer, live folder watching, play counts, and a Properties dialog.
 
 ---
 
 ## Requirements
 
-- **Node.js** 24.x (developed against v24.14.1)
-- **Windows 11** (the only supported target)
+- **Node.js 24.x** (developed against v24.14.1)
+- **Windows 11**
 
-There is **no C++ toolchain requirement** — see "No native modules" below.
+There is **no C++ toolchain requirement** — see [No native modules](#no-native-modules) below.
 
 ## Running in development
 
@@ -24,22 +38,20 @@ npm run dev
 
 ### ⚠ `ELECTRON_RUN_AS_NODE`
 
-If this variable is set in your shell, **Electron will run the app as plain Node**: `require('electron')` resolves to the npm shim instead of the built-in module, `app` is `undefined`, and the app dies with a confusing stack trace that looks like an application bug.
+If this variable is set in your shell, **Electron runs the app as plain Node**: `require('electron')` resolves to the npm shim instead of the built-in module, `app` is `undefined`, and the app dies with a stack trace that looks like an application bug.
 
-This variable *is* set in some editor and agent environments. Clear it before launching:
+It *is* set in some editor and agent environments. Clear it first:
 
 ```powershell
 Remove-Item Env:\ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 npm run dev
 ```
 
-The Playwright test harness strips it automatically (`tests/e2e/helpers.ts`).
+The Playwright harness strips it automatically (`tests/e2e/helpers.ts`).
 
 ### ⚠ Orphaned Electron processes
 
-Resonance holds a single-instance lock, so a leftover Electron process makes every
-new launch quit instantly — including test runs, which then fail with
-`Target page, context or browser has been closed`. If that happens:
+Resonance holds a single-instance lock, so a leftover process makes every new launch quit instantly — including test runs, which then fail with `Target page, context or browser has been closed`:
 
 ```powershell
 Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -48,24 +60,39 @@ Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
 ## Testing
 
 ```bash
-npm test        # Vitest — pure logic (formatting, and later queue/M3U/EQ)
-npm run test:e2e  # builds, then drives the real Electron app via Playwright
+npm test          # Vitest — pure logic (162 tests)
+npm run test:e2e  # builds, then drives the real Electron app (64 tests)
 ```
 
-E2E screenshots are written to `test-results/`.
+Audio fixtures are **generated**, not committed — `tests/fixtures/gen-audio.ts` synthesizes tagged FLAC/M4A/OGG/Opus/WAV/MP3 from a tone via `ffmpeg-static`, plus a ~112 MB file for range-seek testing. First run takes a few seconds; afterwards they are reused.
+
+Screenshots and reports land in `test-results/`.
 
 ## Building the installer
 
 ```bash
-npm run dist      # NSIS installer + portable build (slice 9)
+npm run dist      # NSIS installer + portable build -> release/
 npm run dist:dir  # unpacked directory, faster for smoke-testing
 ```
 
-## No native modules — and why
+Produces:
 
-The spec originally called for `better-sqlite3`. That requires compiling against Electron's Node ABI, which needs MSBuild. **This machine has Visual Studio 2022 with the VC++ components registered but no `MSBuild.exe` installed at all**, so no native module can be built here.
+| Artifact | Size |
+|---|---|
+| `release/Resonance-0.1.0-x64.exe` (installer) | ~97 MB |
+| `release/Resonance-0.1.0-portable.exe` | ~97 MB |
 
-Resonance therefore uses **`node:sqlite`**, built into Electron's bundled Node. Verified working inside Electron 43.2.0: SQLite 3.53.1, prepared statements, bulk transactions, named parameters, WAL, and FTS5.
+The installer is **not code-signed**, so Windows SmartScreen will warn on first run — choose *More info → Run anyway*. Signing needs a certificate you'd have to supply.
+
+Uninstalling deliberately **leaves your library and settings** in `%APPDATA%\Resonance`. Deleting playlists and play counts because someone updated the app would be hostile.
+
+---
+
+## No native modules
+
+The spec originally called for `better-sqlite3`, which must compile against Electron's Node ABI. **This machine has Visual Studio 2022 with the VC++ components registered but no `MSBuild.exe` installed at all**, so no native module can be built here.
+
+Resonance therefore uses **`node:sqlite`**, built into Electron's bundled Node. Verified inside Electron 43.2.0 — and again inside the *packaged* build: SQLite 3.53.1, prepared statements, bulk transactions, named parameters, WAL, and FTS5.
 
 ```bash
 npm run probe:sqlite   # reproduces that verification
@@ -73,21 +100,40 @@ npm run probe:sqlite   # reproduces that verification
 
 Consequences:
 
-- **No rebuild step exists**, so there is none to document. `@electron/rebuild` is not a dependency.
-- Every remaining dependency (`music-metadata`, `chokidar`, `electron-store`) is pure JavaScript, which makes packaging considerably more reliable.
-- If you later install the "Desktop development with C++" workload **including MSBuild** and want `better-sqlite3` back, the database layer is isolated behind `src/main/db/index.ts` so the swap is one file.
+- **No rebuild step exists**, so there is none to document. `@electron/rebuild` is not a dependency and `npmRebuild` is off.
+- Every remaining runtime dependency (`music-metadata`, `chokidar`, `electron-store`) is pure JavaScript, which makes packaging considerably more reliable.
+- If you later install the "Desktop development with C++" workload **including MSBuild** and want `better-sqlite3` back, the database layer is isolated behind `src/main/db/index.ts` — the swap is one file.
 
 Full reasoning and the diagnosis trail are in [PLAN.md](PLAN.md) §A7.
 
-## Project layout
+---
+
+## Architecture
 
 ```
 shared/          types + IPC channel names, shared by all three processes
-src/main/        SQLite, filesystem, scanning, tray, shortcuts, windows
+src/main/        SQLite, filesystem, scanning, tray, shortcuts, windows, protocols
 src/preload/     the only main↔renderer bridge (contextBridge, narrow + typed)
 src/renderer/    all UI, and the Web Audio playback graph
 tests/unit/      Vitest — pure logic
 tests/e2e/       Playwright — drives the real Electron app
 ```
 
-Security posture: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. The renderer never touches the filesystem or the database; it asks main over IPC. The preload exposes named capabilities only — never a generic `invoke(channel, ...)` passthrough. This is asserted by an e2e test, not just intended.
+**Security.** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. The renderer never touches the filesystem or the database; it asks main over IPC. The preload exposes named capabilities only — never a generic `invoke(channel, …)` passthrough. This is asserted by an e2e test, not just intended.
+
+**Media never travels as a file path.** Audio and artwork reach the renderer through custom `resonance-media://` and `resonance-art://` schemes that accept only opaque IDs, resolved against the database in main. A compromised renderer cannot read arbitrary files by asking for them, and path traversal is rejected (tested).
+
+**One audio graph.** Two `<audio>` decks are created once and reused by swapping `src`, because `createMediaElementSource` may be called only once per element — a second call kills audio silently. The mini-player owns no audio at all; it is a remote control, since two AudioContexts would mean genuine double playback.
+
+**The design identity is fixed.** The blue→purple gradient is a token used for the player bar, active row, progress fill, play button, EQ fills and focus states, and is never derived from artwork. Album art tints exactly one surface — a clamped wash behind the Now Playing artwork.
+
+---
+
+## Known limitations
+
+- **WMA is best-effort**, dependent on system codecs. It is not verified.
+- **WAV cannot carry non-ASCII tags.** RIFF INFO predates Unicode, so a CJK artist comes back mangled. ID3v2, Vorbis comments and MP4 atoms all round-trip it correctly. This is a property of the format, and there is a passing test that documents it.
+- **Snap Layouts hover flyout is unavailable.** That flyout attaches to the *native* maximize button, which a frameless window does not have. Win+Arrow, Win+Z, double-click-maximize and drag-to-top-maximize all still work.
+- **Smart playlists were cut from scope.** Play counts and last-played are tracked, so they remain cheap to add.
+- **The installer is unsigned** (see above).
+- **x64 only** — an untested arm64 binary would be worse than none.

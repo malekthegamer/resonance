@@ -1,0 +1,81 @@
+appId: com.resonance.player
+productName: Resonance
+copyright: Copyright © 2026 malek
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/{.eslintrc,.editorconfig,.prettierrc}'
+
+# Icons the tray loads at runtime. They must ship alongside the app, not only be
+# consumed at build time — the tray reads them from resourcesPath when packaged.
+extraResources:
+  - from: build/tray.png
+    to: tray.png
+  - from: build/tray@2x.png
+    to: tray@2x.png
+  - from: build/icon-32.png
+    to: icon-32.png
+
+# No native modules: the library DB uses node:sqlite, built into Electron. This
+# is why there is no rebuild step and no ABI risk in the packaged build.
+npmRebuild: false
+buildDependenciesFromSource: false
+
+win:
+  icon: build/icon.ico
+  # x64 only. This machine cannot cross-build, and shipping an untested arm64
+  # binary would be worse than not shipping one.
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Resonance
+  # Leave the library and settings in place on uninstall. Deleting a user's
+  # playlists and play counts because they updated the app would be hostile;
+  # %APPDATA%\Resonance is theirs to remove.
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+# Association so double-clicking a track opens Resonance.
+fileAssociations:
+  - ext: mp3
+    name: MP3 Audio
+    role: Viewer
+  - ext: flac
+    name: FLAC Audio
+    role: Viewer
+  - ext: m4a
+    name: M4A Audio
+    role: Viewer
+  - ext: ogg
+    name: OGG Audio
+    role: Viewer
+  - ext: opus
+    name: Opus Audio
+    role: Viewer
+  - ext: wav
+    name: WAV Audio
+    role: Viewer
+  - ext: m3u8
+    name: M3U8 Playlist
+    role: Viewer
