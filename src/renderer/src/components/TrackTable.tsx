@@ -22,6 +22,7 @@ interface Props {
   showArt?: boolean
   onPlay?(tracks: Track[], index: number): void
   currentTrackId?: number | null
+  onContextMenu?(e: React.MouseEvent, track: Track, index: number): void
 }
 
 /**
@@ -35,7 +36,8 @@ export function TrackTable({
   tracks,
   showArt = true,
   onPlay,
-  currentTrackId
+  currentTrackId,
+  onContextMenu
 }: Props): React.JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null)
   const sortKey = useLibrary((s) => s.sortKey)
@@ -100,6 +102,7 @@ export function TrackTable({
                 role="row"
                 tabIndex={0}
                 onDoubleClick={() => onPlay?.(tracks, item.index)}
+                onContextMenu={(e) => onContextMenu?.(e, track, item.index)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') onPlay?.(tracks, item.index)
                 }}

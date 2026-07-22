@@ -103,3 +103,61 @@
   color: var(--text-lo);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- playlists ---- */
+
+.plHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-right: 4px;
+}
+
+.plActions {
+  display: flex;
+  gap: 2px;
+}
+
+.plAction {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--text-lo);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.plAction:hover {
+  color: var(--text-hi);
+  background: var(--row-hover);
+}
+
+.plName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plCount {
+  font-size: 11px;
+  color: var(--text-lo);
+  font-variant-numeric: tabular-nums;
+}
+
+.newInput {
+  width: 100%;
+  padding: 8px 11px;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-hi);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--accent-a);
+  outline: none;
+  user-select: text;
+}

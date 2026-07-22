@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { AppInfo, DbInfo, ScanProgress, Settings, Track } from '@shared/types'
 import type { LibraryStats } from '../main/ipc/library'
+import type { ImportResult } from '../main/ipc/playlists'
+import type { PlaylistSummary } from '../main/db/playlists'
 
 /**
  * The only bridge between main and renderer.
@@ -31,6 +33,30 @@ const api = {
         ipcRenderer.removeListener(IPC.LIB_SCAN_PROGRESS, listener)
       }
     }
+  },
+
+  playlists: {
+    list: (): Promise<PlaylistSummary[]> => ipcRenderer.invoke(IPC.PL_LIST),
+    create: (name: string): Promise<number> => ipcRenderer.invoke(IPC.PL_CREATE, name),
+    rename: (id: number, name: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.PL_RENAME, id, name),
+    remove: (id: number): Promise<void> => ipcRenderer.invoke(IPC.PL_DELETE, id),
+    tracks: (id: number): Promise<Track[]> => ipcRenderer.invoke(IPC.PL_TRACKS, id),
+    addTracks: (id: number, trackIds: number[]): Promise<number> =>
+      ipcRenderer.invoke(IPC.PL_ADD, id, trackIds),
+    removeAt: (id: number, position: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.PL_REMOVE, id, position),
+    reorder: (id: number, from: number, to: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.PL_REORDER, id, from, to),
+    importFiles: (paths?: string[]): Promise<ImportResult[]> =>
+      ipcRenderer.invoke(IPC.PL_IMPORT, paths),
+    exportPlaylist: (id: number): Promise<string | null> => ipcRenderer.invoke(IPC.PL_EXPORT, id)
+  },
+
+  tracks: {
+    revealInFolder: (trackId: number): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.TRACK_REVEAL, trackId),
+    recordPlay: (trackId: number): Promise<void> => ipcRenderer.invoke(IPC.TRACK_PLAYED, trackId)
   },
 
   /**

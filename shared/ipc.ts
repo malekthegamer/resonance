@@ -27,6 +27,22 @@ export const IPC = {
   LIB_SEARCH: 'lib:search',
   LIB_STATS: 'lib:stats',
 
+  // Playlists
+  PL_LIST: 'pl:list',
+  PL_CREATE: 'pl:create',
+  PL_RENAME: 'pl:rename',
+  PL_DELETE: 'pl:delete',
+  PL_TRACKS: 'pl:tracks',
+  PL_ADD: 'pl:add',
+  PL_REMOVE: 'pl:remove',
+  PL_REORDER: 'pl:reorder',
+  PL_IMPORT: 'pl:import',
+  PL_EXPORT: 'pl:export',
+
+  // Track actions
+  TRACK_REVEAL: 'track:reveal',
+  TRACK_PLAYED: 'track:played',
+
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set'

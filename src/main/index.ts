@@ -6,6 +6,7 @@ import { createMainWindow, getMainWindow } from './windows/main'
 import { getAllSettings, getSetting, setSetting } from './settings'
 import { closeDb, getDb, getDbInfo } from './db/open'
 import { registerLibraryIpc } from './ipc/library'
+import { registerPlaylistIpc } from './ipc/playlists'
 import { registerProtocolHandlers, registerSchemes } from './protocol'
 
 // Must run before app.whenReady() — privileged scheme registration is only
@@ -55,6 +56,7 @@ if (!app.requestSingleInstanceLock()) {
     registerProtocolHandlers()
     registerIpc()
     registerLibraryIpc()
+    registerPlaylistIpc()
     createMainWindow()
 
     app.on('activate', () => {
