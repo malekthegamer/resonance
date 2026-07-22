@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { Track } from '@shared/types'
 import { AudioEngine } from '../audio/engine'
 import {
-  hasExpired,
   shouldStopAtTrackEnd,
   SLEEP_OFF,
   startEndOfTrack,

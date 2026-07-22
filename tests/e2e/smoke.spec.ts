@@ -19,7 +19,12 @@ test('launches a frameless window with the security posture the plan requires', 
   // bar would make the content strictly shorter.
   const flags = await app.evaluate(async ({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows()[0]
-    const prefs = win.webContents.getLastWebPreferences()
+    // Present at runtime but absent from Electron's public typings.
+    const prefs = (
+      win.webContents as unknown as {
+        getLastWebPreferences(): Record<string, boolean> | null
+      }
+    ).getLastWebPreferences()
     const bounds = win.getBounds()
     const content = win.getContentBounds()
     return {

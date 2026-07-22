@@ -1,4 +1,40 @@
 {
-  "files": [],
-  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+  // One project for typechecking everything.
+  //
+  // A node/web/test split was tried and abandoned: the renderer legitimately
+  // imports the preload's API type, the preload imports types from main, and
+  // Playwright's page.evaluate() callbacks use `window` inside otherwise-Node
+  // test files. Splitting them meant every real dependency became a project
+  // boundary error. Vite enforces the actual runtime boundaries at build time;
+  // this config exists to catch type errors, not to police architecture.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    // TypeScript 7 removed baseUrl; paths are relative to this file.
+    "paths": {
+      "@renderer/*": ["./src/renderer/src/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "shared/**/*.ts",
+    "tests/**/*.ts",
+    "electron.vite.config.ts",
+    "playwright.config.ts",
+    "vitest.config.ts"
+  ]
 }

@@ -13,8 +13,7 @@ import {
   removeAt,
   setQueue,
   setShuffle,
-  shuffled,
-  type QueueState
+  shuffled
 } from '@renderer/core/queue'
 
 /** Deterministic RNG so shuffle behaviour is reproducible. */
@@ -27,10 +26,6 @@ function seededRng(seed = 42): () => number {
 }
 
 const IDS = [10, 20, 30, 40, 50]
-
-function q(over: Partial<QueueState> = {}): QueueState {
-  return { ...setQueue(IDS, 0), ...over }
-}
 
 describe('setQueue', () => {
   it('starts at the requested index', () => {

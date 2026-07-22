@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'

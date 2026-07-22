@@ -413,8 +413,10 @@ export class AudioEngine {
   }
 
   /** Frequency data for the visualizer. Reuses one buffer to avoid GC churn. */
-  private freqData: Uint8Array | null = null
-  getFrequencyData(): Uint8Array {
+  // Typed with the ArrayBuffer parameter because getByteFrequencyData requires
+  // a view over a real ArrayBuffer, not a SharedArrayBuffer.
+  private freqData: Uint8Array<ArrayBuffer> | null = null
+  getFrequencyData(): Uint8Array<ArrayBuffer> {
     if (!this.freqData || this.freqData.length !== this.analyser.frequencyBinCount) {
       this.freqData = new Uint8Array(this.analyser.frequencyBinCount)
     }
