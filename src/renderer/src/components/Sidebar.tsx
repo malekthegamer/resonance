@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useDroppable } from '@dnd-kit/core'
 import { useLibrary, type ViewId } from '../state/library'
 import { usePlaylists } from '../state/playlists'
+import { type PlaylistDrop } from '../core/dnd'
+import type { PlaylistSummary } from '../../../main/db/playlists'
 import {
   IconAlbums,
   IconArtists,
@@ -20,6 +23,57 @@ const VIEWS: Array<{ id: ViewId; label: string; Icon: (p: { size?: number }) => 
   { id: 'genres', label: 'Genres', Icon: IconGenres },
   { id: 'recent', label: 'Recently Added', Icon: IconRecent }
 ]
+
+interface PlaylistRowProps {
+  playlist: PlaylistSummary
+  active: boolean
+  onOpen(): void
+  onContextMenu(e: React.MouseEvent): void
+  onStartRename(): void
+}
+
+/**
+ * A playlist row, doubling as a drop target for tracks dragged from the table.
+ *
+ * Split out because `useDroppable` is a hook and playlists are a map. The
+ * droppable is registered on the `<li>` rather than the button so the target
+ * keeps its rect while the row is being renamed inline and the button does not
+ * exist.
+ */
+function PlaylistRow({
+  playlist,
+  active,
+  onOpen,
+  onContextMenu,
+  onStartRename
+}: PlaylistRowProps): React.JSX.Element {
+  // Always registered, so its rect is measured when a drag begins. App's
+  // collision detection is what keeps a queue reorder from landing here.
+  const { setNodeRef, isOver } = useDroppable({
+    id: `playlist-${playlist.id}`,
+    data: { type: 'playlist', playlistId: playlist.id } satisfies PlaylistDrop
+  })
+
+  return (
+    <li ref={setNodeRef}>
+      <button
+        className={`${styles.item} ${active ? styles.active : ''} ${isOver ? styles.dropTarget : ''}`}
+        onClick={onOpen}
+        onContextMenu={onContextMenu}
+        onDoubleClick={onStartRename}
+        data-testid="playlist-item"
+        data-drop-over={isOver ? 'true' : undefined}
+        title={playlist.name}
+      >
+        <span className={styles.icon} aria-hidden>
+          <IconPlaylist size={16} />
+        </span>
+        <span className={styles.plName}>{playlist.name}</span>
+        <span className={styles.plCount}>{playlist.trackCount}</span>
+      </button>
+    </li>
+  )
+}
 
 interface SidebarProps {
   onNavigate(view: ViewId): void
@@ -146,9 +200,9 @@ export function Sidebar({
             />
           </li>
         )}
-        {playlists.map((pl) => (
-          <li key={pl.id}>
-            {renamingId === pl.id ? (
+        {playlists.map((pl) =>
+          renamingId === pl.id ? (
+            <li key={pl.id}>
               <input
                 className={styles.newInput}
                 autoFocus
@@ -162,24 +216,18 @@ export function Sidebar({
                 data-testid="playlist-rename-input"
                 aria-label="Rename playlist"
               />
-            ) : (
-            <button
-              className={`${styles.item} ${openPlaylistId === pl.id ? styles.active : ''}`}
-              onClick={() => onOpenPlaylist(pl.id)}
+            </li>
+          ) : (
+            <PlaylistRow
+              key={pl.id}
+              playlist={pl}
+              active={openPlaylistId === pl.id}
+              onOpen={() => onOpenPlaylist(pl.id)}
               onContextMenu={(e) => onPlaylistContextMenu(e, pl.id, pl.name)}
-              onDoubleClick={() => onRenamingChange(pl.id)}
-              data-testid="playlist-item"
-              title={pl.name}
-            >
-              <span className={styles.icon} aria-hidden>
-                <IconPlaylist size={16} />
-              </span>
-              <span className={styles.plName}>{pl.name}</span>
-              <span className={styles.plCount}>{pl.trackCount}</span>
-            </button>
-            )}
-          </li>
-        ))}
+              onStartRename={() => onRenamingChange(pl.id)}
+            />
+          )
+        )}
       </ul>
 
       <div className={styles.spacer} />

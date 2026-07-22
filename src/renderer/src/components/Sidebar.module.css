@@ -65,6 +65,18 @@
   background: var(--accent-grad);
 }
 
+/*
+ * Hovered by a drag. The pointer is holding a batch of tracks and covering part
+ * of the row, so the cue is an outline plus a lift rather than a fill — a fill
+ * alone reads as "selected" and is easy to miss under the cursor.
+ */
+.dropTarget {
+  color: var(--text-hi);
+  background: var(--glass-bg-strong);
+  outline: 2px solid var(--accent-a);
+  outline-offset: -2px;
+}
+
 .icon {
   width: 18px;
   display: grid;

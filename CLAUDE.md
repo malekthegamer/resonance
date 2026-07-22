@@ -58,6 +58,14 @@ also means it holds the single-instance lock and its database.
 and Node refuses to launch `.bat`/`.cmd` without a shell (CVE-2024-27980). Do
 the work in-process instead; `scripts/release.mjs` shows the pattern.
 
+**A drag swallows the next click for 50 ms.** On drag start dnd-kit installs a
+capturing `click` listener on `document` that calls `stopPropagation`, and tears
+it down on a `setTimeout(…, 50)` after the drop — see `AbstractPointerSensor`
+in `@dnd-kit/core`. It exists to eat the click the drag itself generates. A
+person moving a mouse never notices; Playwright clicks well inside the window,
+so a click issued straight after a drag silently does nothing and looks like a
+broken button. `tests/e2e/drag.spec.ts` waits it out.
+
 **Be careful writing JS strings via shell heredocs.** A literal NUL byte once
 ended up in `grouping.ts` where a space belonged. It renders as blank in every
 editor, defeated three separate string replacements, and silently broke album

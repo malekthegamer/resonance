@@ -128,6 +128,15 @@
   background: var(--row-active);
 }
 
+/*
+ * Rows stay in place while dragging — the DragOverlay is what follows the
+ * pointer. Fading the origin is the only cue that the row is in flight, since
+ * the virtualizer owns the row's transform and dnd-kit cannot move it.
+ */
+.dragging {
+  opacity: 0.4;
+}
+
 /* Active-track highlight uses the fixed identity accent (plan §A4). */
 .current {
   background: var(--row-active);

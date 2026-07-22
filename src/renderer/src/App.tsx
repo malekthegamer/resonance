@@ -1,4 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  pointerWithin,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+  type Modifier
+} from '@dnd-kit/core'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import { getEventCoordinates } from '@dnd-kit/utilities'
 import type { Theme, Track } from '@shared/types'
 import type { ViewId } from './state/library'
 import { TitleBar } from './components/TitleBar'
@@ -26,6 +43,7 @@ import {
   recentlyAdded
 } from './core/grouping'
 import { sortTracks } from './core/sort'
+import { dragLabel, readDragData, readDropData, resolveDrop, type DragData } from './core/dnd'
 import { useLibrary } from './state/library'
 import { usePlayer } from './state/player'
 import { usePlaylists } from './state/playlists'
@@ -50,6 +68,28 @@ interface MenuState {
   items: MenuItem[]
 }
 
+/** Stable identity, so a non-queue drag does not re-render on every frame. */
+const NO_MODIFIERS: Modifier[] = []
+const VERTICAL_ONLY: Modifier[] = [restrictToVerticalAxis]
+/**
+ * Puts the drag chip just below-right of the pointer, the way a native drag
+ * badge sits. Centring it on the cursor (`snapCenterToCursor`) covered the very
+ * playlist name the user is aiming at, so the target became unreadable at the
+ * moment it mattered most.
+ */
+const chipBesideCursor: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
+  if (!draggingNodeRect || !activatorEvent) return transform
+  const pointer = getEventCoordinates(activatorEvent)
+  if (!pointer) return transform
+  return {
+    ...transform,
+    x: transform.x + (pointer.x - draggingNodeRect.left) + 14,
+    y: transform.y + (pointer.y - draggingNodeRect.top) + 14
+  }
+}
+
+const CHIP_TO_CURSOR: Modifier[] = [chipBesideCursor]
+
 export default function App(): React.JSX.Element {
   const [theme, setTheme] = useState<Theme>('dark')
   const [dragging, setDragging] = useState(false)
@@ -60,6 +100,7 @@ export default function App(): React.JSX.Element {
   const [renamingPlaylistId, setRenamingPlaylistId] = useState<number | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null)
   const [showVisualizer, setShowVisualizer] = useState(true)
+  const [activeDrag, setActiveDrag] = useState<DragData | null>(null)
 
   const {
     tracks, view, focus, query, searchResults, sortKey, sortDir,
@@ -77,6 +118,7 @@ export default function App(): React.JSX.Element {
   const pruneSelection = useSelection((s) => s.prune)
   const selectedTracksOf = useSelection((s) => s.selectedTracks)
   const addToQueue = usePlayer((s) => s.addToQueue)
+  const moveInQueue = usePlayer((s) => s.moveInQueue)
   useKeyboardShortcuts()
   useDesktopIntegration()
   useSessionAndTimers()
@@ -156,6 +198,99 @@ export default function App(): React.JSX.Element {
       if (t) void window.resonance.tracks.recordPlay(t.id)
     },
     [playTracks]
+  )
+
+  /*
+   * Drag and drop.
+   *
+   * One provider for the whole app: dnd-kit does not support nested contexts,
+   * and dragging library rows into the queue panel means both ends have to live
+   * under the same one. See core/dnd.ts for the routing rules.
+   */
+  const sensors = useSensors(
+    // Without a distance threshold every click on a row starts a drag and the
+    // row becomes unclickable — which is exactly the bug that made the sidebar
+    // feel broken before.
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  /*
+   * Collision detection differs by what is being dragged, so the candidates are
+   * filtered here rather than by disabling droppables. Disabling them mid-drag
+   * would mean the registry changes after measurement, which is how drop targets
+   * end up with stale rects; filtering leaves everything measured from the start.
+   *
+   * Sortable rows want closestCenter — a row must take the drop when the pointer
+   * is *between* two rows. A playlist is the opposite: it should only take a drop
+   * when the pointer is genuinely over it, or a drag released over empty sidebar
+   * would land in whichever playlist happened to be nearest.
+   */
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    const dragging = readDragData(args.active.data.current)?.type
+    const reordering = dragging === 'queue-item'
+
+    const droppableContainers = args.droppableContainers.filter((c) => {
+      const drop = readDropData(c.data.current)
+      // A queue row can only ever land on another queue row.
+      return reordering ? drop?.type === 'queue-item' : drop !== null
+    })
+
+    const scoped = { ...args, droppableContainers }
+    return reordering ? closestCenter(scoped) : pointerWithin(scoped)
+  }, [])
+
+  const titleById = useMemo(
+    () => new Map(visibleTracks.map((t) => [t.id, t.title])),
+    [visibleTracks]
+  )
+
+  const onDragStart = useCallback(
+    (e: DragStartEvent) => {
+      const data = readDragData(e.active.data.current)
+      setActiveDrag(data)
+      // Grabbing a row outside the selection makes it the selection, so what
+      // travels with the pointer is always what is highlighted. Same rule as
+      // right-click, so the two gestures cannot disagree.
+      if (data?.type === 'library-tracks') contextMenuAt(data.originId)
+    },
+    [contextMenuAt]
+  )
+
+  const onDragEnd = useCallback(
+    async (e: DragEndEvent): Promise<void> => {
+      setActiveDrag(null)
+      const action = resolveDrop(
+        readDragData(e.active.data.current),
+        readDropData(e.over?.data.current)
+      )
+      if (!action) return
+
+      if (action.kind === 'reorder-queue') {
+        moveInQueue(action.from, action.to)
+        return
+      }
+
+      const n = action.trackIds.length
+      const noun = n === 1 ? 'track' : 'tracks'
+
+      if (action.kind === 'add-to-playlist') {
+        await addToPlaylist(action.playlistId, [...action.trackIds])
+        const name = playlists.find((p) => p.id === action.playlistId)?.name
+        setToast(`Added ${n} ${noun} to ${name ?? 'playlist'}`)
+        return
+      }
+
+      // add-to-queue. The queue holds whole tracks, not ids, and the drag only
+      // carries ids — so they are resolved against what is on screen, which is
+      // where the drag started.
+      const byId = new Map(visibleTracks.map((t) => [t.id, t]))
+      const list = action.trackIds.map((id) => byId.get(id)).filter((t): t is Track => Boolean(t))
+      if (list.length === 0) return
+      addToQueue(list)
+      setToast(`Added ${list.length} ${list.length === 1 ? 'track' : 'tracks'} to the queue`)
+    },
+    [moveInQueue, addToPlaylist, playlists, visibleTracks, addToQueue]
   )
 
   /**
@@ -351,6 +486,17 @@ export default function App(): React.JSX.Element {
     >
       <TitleBar />
 
+      <DndContext
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        // Queue rows are pinned to their column while reordering. Library rows
+        // must be free to travel sideways to the sidebar, so the restriction is
+        // applied per drag rather than to the provider as a whole.
+        modifiers={activeDrag?.type === 'queue-item' ? VERTICAL_ONLY : NO_MODIFIERS}
+        onDragStart={onDragStart}
+        onDragEnd={(e) => void onDragEnd(e)}
+        onDragCancel={() => setActiveDrag(null)}
+      >
       <div className={styles.body}>
         <Sidebar
           onNavigate={navigateTo}
@@ -444,6 +590,31 @@ export default function App(): React.JSX.Element {
           />
         )}
       </div>
+
+        {/*
+          Only library drags get an overlay. A queue row moves itself through the
+          sortable transform, and rendering an overlay for it too would show the
+          row in two places at once.
+        */}
+        <DragOverlay
+          dropAnimation={null}
+          /*
+           * The wrapper is sized from the dragged node by default, which for a
+           * table row is the full width of the content area — the chip then
+           * stretched across the window as a bare gradient bar. Sizing it to its
+           * own content and snapping it to the cursor makes it read as something
+           * held, rather than a row torn loose.
+           */
+          style={{ width: 'auto', height: 'auto' }}
+          modifiers={CHIP_TO_CURSOR}
+        >
+          {activeDrag?.type === 'library-tracks' ? (
+            <div className={styles.dragChip} data-testid="drag-chip">
+              {dragLabel(activeDrag.trackIds, (id) => titleById.get(id))}
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <PlayerBar
         onOpenQueue={() => setPanel(panel === 'queue' ? null : 'queue')}

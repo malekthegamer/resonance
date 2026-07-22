@@ -1,7 +1,10 @@
 # Status
 
-Version **0.1.4** · 154 unit tests, 77 e2e tests, all passing · shipped and in
+Version **0.1.4** · 204 unit tests, 98 e2e tests, all passing · shipped and in
 daily use.
+
+Unreleased on `master`: track selection (slice 1) and drag-to-playlist (slice 2).
+Tag editing is next; see the slice plan in the working notes.
 
 Everything in the original spec is built except smart playlists, which were cut
 deliberately. What follows is what is *not* done, what is known-broken, and what
@@ -11,7 +14,9 @@ is unverified. Verified means it was executed and observed, not reasoned about.
 
 ## Verified working
 
-Library scanning, all five browse views, virtualized sortable table, FTS search,
+Library scanning, all five browse views, virtualized sortable table with
+click/ctrl/shift multi-select, dragging selected tracks onto a sidebar playlist
+or the queue, FTS search,
 drag-and-drop of files/folders/playlists, full transport with shuffle and all
 three repeat modes, reorderable queue, playlist CRUD with persisted drag order,
 M3U/M3U8 import and export, 10-band EQ with presets, spectrum visualizer, Now
@@ -29,22 +34,16 @@ range-seek timings, per-format scan counts.
 
 Ordered roughly by how much they'd improve the app.
 
-### No track selection model
-Single-click does nothing; only double-click plays and right-click opens the
-menu. There is no multi-select, so "add these 12 tracks to a playlist" means
-twelve right-clicks. Probably the biggest usability gap. Would need a selection
-store, shift/ctrl-click ranges, and context-menu actions that operate on the
-selection.
-
 ### Smart playlists — cut from scope
 "Most Played" and "Recently Added (auto)" were dropped. `play_count` and
 `last_played` are tracked and indexed, so this is mostly a query plus a sidebar
 entry.
 
-### No drag-to-playlist
-Tracks reach playlists only through the context menu. Dragging rows onto a
-sidebar playlist is the obvious interaction and `@dnd-kit` is already a
-dependency.
+### Library rows cannot be dragged by keyboard
+Drag-to-playlist is pointer-only. dnd-kit's keyboard sensor activates on
+Enter/Space, which already mean "play" on a track row, and there is no sensible
+keyboard path from the table to a sidebar drop target. The context menu does
+everything dragging does, so this is an ergonomics gap rather than a dead end.
 
 ### Untagged libraries have three empty views
 Albums, Artists and Genres are one "Unknown" bucket when files carry no tags.
@@ -110,12 +109,12 @@ during development — a running instance holds the single-instance lock.
 
 ## Test coverage notes
 
-**Unit (154)** — queue state machine (exhaustive across shuffle × repeat ×
+**Unit (204)** — queue state machine (exhaustive across shuffle × repeat ×
 end-of-list), M3U parsing/writing, EQ presets and clamping, sleep timer,
 grouping/sorting, filename→title repair, database schema and migrations,
-generated fixture integrity.
+generated fixture integrity, selection arithmetic, drag routing.
 
-**E2E (77)** — drives the real Electron app across 11 spec files. Highlights
+**E2E (98)** — drives the real Electron app across 13 spec files. Highlights
 worth preserving:
 
 - `playback.spec.ts` — the **FFT silence tripwire**: measures analyser peak over
@@ -127,6 +126,10 @@ worth preserving:
 - `eq-nowplaying.spec.ts` — §A4 identity check with deliberately extreme covers.
 - `session.spec.ts` — restore across a genuine quit and relaunch, not a reload.
 - `navigation.spec.ts` — regressions for the sidebar and rename bugs.
+- `drag.spec.ts` — drives real pointer drags. Also the **only** coverage of
+  queue reordering as a gesture: that existed long before the drag work but was
+  only ever exercised through the store, so consolidating the two `DndContext`s
+  into one had no regression net where it could actually break.
 
 **Not covered:** mini-player always-on-top (environment-dependent, see above), WMA playback, code-signed installs, multi-monitor DPI changes,
 libraries in the 10k+ range (the largest real test is ~100 tracks), and

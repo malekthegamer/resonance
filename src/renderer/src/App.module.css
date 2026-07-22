@@ -21,6 +21,25 @@
 
 /* ---- drag-and-drop overlay ---- */
 
+/*
+ * Follows the pointer while library tracks are being dragged. It is a chip
+ * rather than a ghost of the row: a drag is usually a batch, and a single
+ * translucent row would misrepresent twelve tracks as one.
+ */
+.dragChip {
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-hi);
+  white-space: nowrap;
+  background: var(--accent-grad-h);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.45);
+  /* The chip is under the cursor; it must never eat the drop it is announcing. */
+  pointer-events: none;
+  cursor: grabbing;
+}
+
 .dropOverlay {
   position: fixed;
   inset: 0;

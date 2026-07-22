@@ -9,6 +9,17 @@
   backdrop-filter: blur(var(--glass-blur)) saturate(140%);
 }
 
+/*
+ * Hovered by tracks dragged from the library. A tint alone is nearly invisible
+ * on a target this large, so the panel gets a full inset border — the same cue
+ * the sidebar playlists use, scaled up.
+ */
+.dropTarget {
+  background: var(--glass-bg-strong);
+  outline: 2px solid var(--accent-a);
+  outline-offset: -2px;
+}
+
 .head {
   display: flex;
   align-items: flex-start;

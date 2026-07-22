@@ -1,25 +1,20 @@
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent
-} from '@dnd-kit/core'
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy
-} from '@dnd-kit/sortable'
+import { useDroppable } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { formatDuration } from '../core/format'
 import { usePlayer } from '../state/player'
+import { type QueueDrag, type QueueDrop } from '../core/dnd'
 import { AlbumArt } from './AlbumArt'
 import { IconClose } from './Icons'
 import styles from './QueuePanel.module.css'
+
+/*
+ * This panel used to own a `DndContext`. It does not any more — there is a
+ * single provider at App level, because dnd-kit does not support nesting them
+ * and library rows have to be able to drop *into* this panel. Reordering still
+ * works the same way; the sensors, modifiers and drag-end handling moved up,
+ * and the `SortableContext` below stayed.
+ */
 
 interface RowProps {
   id: string
@@ -33,7 +28,10 @@ function QueueRow({ id, index, isCurrent }: RowProps): React.JSX.Element {
   const track = known.get(trackId)
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id
+    id,
+    // The position, not the track id: the same track may legitimately appear
+    // twice in a queue, so only the slot identifies the row.
+    data: { type: 'queue-item', index } satisfies QueueDrag
   })
 
   return (
@@ -83,26 +81,21 @@ interface Props {
 }
 
 export function QueuePanel({ onClose }: Props): React.JSX.Element {
-  const { queue, moveInQueue } = usePlayer()
+  const { queue } = usePlayer()
 
-  const sensors = useSensors(
-    // A small distance threshold means a click still registers as a click; without
-    // it every click on a row starts a drag and the row becomes unclickable.
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
-
-  // dnd-kit needs stable string ids. Queue positions are the identity here
-  // because the same track may legitimately appear twice in a queue.
+  // dnd-kit needs stable string ids; the position supplies one.
   const ids = queue.items.map((_, i) => `q-${i}`)
 
-  function onDragEnd(event: DragEndEvent): void {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    const from = ids.indexOf(String(active.id))
-    const to = ids.indexOf(String(over.id))
-    if (from >= 0 && to >= 0) moveInQueue(from, to)
-  }
+  /*
+   * The panel itself is a drop target, so tracks can be dropped into an empty
+   * queue or below the last row. A container this large would beat the row the
+   * user is aiming at during a reorder — App's collision detection excludes it
+   * from queue drags rather than this component tracking what is in flight.
+   */
+  const { setNodeRef, isOver } = useDroppable({
+    id: 'queue-panel',
+    data: { type: 'queue' } satisfies QueueDrop
+  })
 
   const totalDuration = queue.items.reduce(
     (sum, id) => sum + (usePlayer.getState().known.get(id)?.duration ?? 0),
@@ -110,7 +103,12 @@ export function QueuePanel({ onClose }: Props): React.JSX.Element {
   )
 
   return (
-    <aside className={styles.panel} data-testid="queue-panel">
+    <aside
+      ref={setNodeRef}
+      className={`${styles.panel} ${isOver ? styles.dropTarget : ''}`}
+      data-testid="queue-panel"
+      data-drop-over={isOver ? 'true' : undefined}
+    >
       <header className={styles.head}>
         <div>
           <h2 className={styles.heading}>Play queue</h2>
@@ -129,20 +127,13 @@ export function QueuePanel({ onClose }: Props): React.JSX.Element {
           Nothing queued. Double-click a track, or use “Play next” from a right-click menu.
         </p>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          modifiers={[restrictToVerticalAxis]}
-          onDragEnd={onDragEnd}
-        >
-          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-            <ul className={styles.list}>
-              {ids.map((id, index) => (
-                <QueueRow key={id} id={id} index={index} isCurrent={index === queue.index} />
-              ))}
-            </ul>
-          </SortableContext>
-        </DndContext>
+        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+          <ul className={styles.list}>
+            {ids.map((id, index) => (
+              <QueueRow key={id} id={id} index={index} isCurrent={index === queue.index} />
+            ))}
+          </ul>
+        </SortableContext>
       )}
     </aside>
   )
