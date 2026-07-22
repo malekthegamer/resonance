@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import type { Track } from '@shared/types'
 import { AudioEngine } from '../audio/engine'
 import {
+  hasExpired,
+  shouldStopAtTrackEnd,
+  SLEEP_OFF,
+  startEndOfTrack,
+  startMinutes,
+  type SleepTimerState
+} from '../core/sleepTimer'
+import {
   addToQueue as qAdd,
   cycleRepeat as qCycleRepeat,
   currentTrackId,
@@ -31,6 +39,10 @@ interface PlayerState {
   error: string | null
   /** Track id -> Track, so the queue can render without re-querying. */
   known: Map<number, Track>
+  crossfadeSec: number
+  sleep: SleepTimerState
+  /** True once a saved session has been restored, so it happens only once. */
+  sessionRestored: boolean
 
   init(): void
   playTracks(tracks: Track[], startIndex: number): Promise<void>
@@ -51,6 +63,12 @@ interface PlayerState {
   moveInQueue(from: number, to: number): void
   jumpTo(index: number): Promise<void>
   clearError(): void
+  setCrossfade(seconds: number): void
+  setSleepMinutes(minutes: number): void
+  setSleepEndOfTrack(): void
+  cancelSleep(): void
+  restoreSession(): Promise<void>
+  persistSession(): void
 }
 
 let engine: AudioEngine | null = null
@@ -72,14 +90,21 @@ export const usePlayer = create<PlayerState>((set, get) => {
     return id == null ? null : (get().known.get(id) ?? null)
   }
 
-  /** Loads whatever the queue now points at and preloads what follows. */
-  async function activate(queue: QueueState, restart: boolean): Promise<void> {
+  /**
+   * Loads whatever the queue now points at and preloads what follows.
+   *
+   * `crossfade` is only true for a natural track end. Crossfading a manual skip
+   * would make the button feel laggy — the user asked for the next track *now*.
+   */
+  async function activate(queue: QueueState, restart: boolean, crossfade = false): Promise<void> {
     const id = currentTrackId(queue)
     if (id == null || !engine) return
 
     if (restart) {
       engine.seek(0)
       await engine.play()
+    } else if (crossfade && get().crossfadeSec > 0) {
+      await engine.crossfadeTo(id)
     } else {
       await engine.load(id, true)
     }
@@ -98,12 +123,24 @@ export const usePlayer = create<PlayerState>((set, get) => {
     muted: false,
     error: null,
     known: new Map(),
+    crossfadeSec: 0,
+    sleep: SLEEP_OFF,
+    sessionRestored: false,
 
     init() {
       if (engine) return
       engine = new AudioEngine({
         onTimeUpdate: (position, duration) => set({ position, duration }),
-        onEnded: () => void get().next(true),
+        onEnded: () => {
+          // The sleep timer's "end of track" mode stops here rather than
+          // advancing, which is the whole point of that mode.
+          if (shouldStopAtTrackEnd(get().sleep)) {
+            engine?.pause()
+            set({ sleep: SLEEP_OFF })
+            return
+          }
+          void get().next(true)
+        },
         onPlayingChanged: (playing) => set({ playing }),
         onError: (error) => set({ error }),
         onBuffered: (buffered) => set({ buffered })
@@ -116,6 +153,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // that already live in the renderer, so no security boundary changes.
       const w = window as unknown as Record<string, unknown>
       w['__resonanceTestEngine'] = engine
+      // Full store access for the session/timer tests, which need actions the
+      // narrow test shim above does not expose.
+      w['__resonanceStore'] = usePlayer
       w['__resonancePlayer'] = {
         playTracks: (tracks: Track[], index: number) => get().playTracks(tracks, index),
         seek: (sec: number) => get().seek(sec),
@@ -145,6 +185,85 @@ export const usePlayer = create<PlayerState>((set, get) => {
     stop() {
       engine?.stop()
       set({ position: 0 })
+      get().persistSession()
+    },
+
+    setCrossfade(seconds) {
+      engine?.setCrossfade(seconds)
+      set({ crossfadeSec: seconds })
+    },
+
+    setSleepMinutes(minutes) {
+      set({ sleep: startMinutes(minutes) })
+    },
+
+    setSleepEndOfTrack() {
+      set({ sleep: startEndOfTrack() })
+    },
+
+    cancelSleep() {
+      set({ sleep: SLEEP_OFF })
+    },
+
+    /**
+     * Restores the previous listening session.
+     *
+     * Loaded paused and seeked to the saved position: resuming playback
+     * unprompted on launch is startling, and the spec asks for the session to be
+     * restored, not resumed.
+     */
+    async restoreSession() {
+      if (get().sessionRestored) return
+      set({ sessionRestored: true })
+
+      const settings = await window.resonance.settings.getAll()
+      get().init()
+      engine?.setVolume(settings.volume ?? 1)
+      engine?.setMuted(settings.muted ?? false)
+      engine?.setCrossfade(settings.crossfadeSec ?? 0)
+      set({
+        volume: settings.volume ?? 1,
+        muted: settings.muted ?? false,
+        crossfadeSec: settings.crossfadeSec ?? 0
+      })
+
+      const session = settings.session
+      if (!session || session.queue.length === 0) return
+
+      // Tracks may have been removed from the library since the session was
+      // saved, so the queue is rebuilt from what still exists.
+      const all = await window.resonance.library.getTracks()
+      const byId = new Map(all.map((t) => [t.id, t]))
+      const tracks = session.queue.map((id) => byId.get(id)).filter((t): t is Track => !!t)
+      if (tracks.length === 0) return
+
+      const index = Math.min(Math.max(0, session.index), tracks.length - 1)
+      const known = remember(tracks)
+      let queue = qSetQueue(tracks.map((t) => t.id), index, get().queue)
+      queue = { ...queue, repeat: session.repeat }
+      if (session.shuffle) queue = qSetShuffle(queue, true)
+
+      set({ known, queue, current: byId.get(tracks[index]!.id) ?? null })
+
+      const id = currentTrackId(queue)
+      if (id != null && engine) {
+        await engine.load(id, false, session.positionSec)
+        set({ position: session.positionSec })
+        engine.preload(peekNext(queue))
+      }
+    },
+
+    persistSession() {
+      const s = get()
+      void window.resonance.settings.set('session', {
+        queue: s.queue.items,
+        index: s.queue.index,
+        positionSec: s.position,
+        shuffle: s.queue.shuffle,
+        repeat: s.queue.repeat
+      })
+      void window.resonance.settings.set('volume', s.volume)
+      void window.resonance.settings.set('muted', s.muted)
     },
 
     async next(auto = false) {
@@ -156,7 +275,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
         engine?.seek(0)
         return
       }
-      await activate(result.state, result.restart)
+      await activate(result.state, result.restart, auto)
+      get().persistSession()
     },
 
     async previous() {

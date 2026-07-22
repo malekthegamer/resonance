@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/types'
 import type { ShortcutStatus } from '../../../main/shortcuts'
 import { IconClose } from './Icons'
+import { usePlayer } from '../state/player'
+import { formatRemaining } from '../core/sleepTimer'
 import styles from './SettingsPanel.module.css'
 
 interface Props {
@@ -12,6 +14,18 @@ interface Props {
 export function SettingsPanel({ onClose, onSettingsChanged }: Props): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [shortcuts, setShortcuts] = useState<ShortcutStatus[]>([])
+  const [, forceTick] = useState(0)
+  const sleep = usePlayer((s) => s.sleep)
+  const setSleepMinutes = usePlayer((s) => s.setSleepMinutes)
+  const setSleepEndOfTrack = usePlayer((s) => s.setSleepEndOfTrack)
+  const cancelSleep = usePlayer((s) => s.cancelSleep)
+
+  // Re-render once a second so the countdown actually counts down.
+  useEffect(() => {
+    if (sleep.mode !== 'minutes') return
+    const id = window.setInterval(() => forceTick((n) => n + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [sleep.mode])
 
   useEffect(() => {
     void window.resonance.settings.getAll().then(setSettings)
@@ -61,6 +75,38 @@ export function SettingsPanel({ onClose, onSettingsChanged }: Props): React.JSX.
               </span>
             </span>
           </label>
+        </section>
+
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Sleep timer</h3>
+          {sleep.mode === 'off' ? (
+            <div className={styles.sleepButtons} data-testid="sleep-options">
+              {[15, 30, 45, 60].map((m) => (
+                <button
+                  key={m}
+                  className={styles.sleepBtn}
+                  onClick={() => setSleepMinutes(m)}
+                  data-testid={`sleep-${m}`}
+                >
+                  {m}m
+                </button>
+              ))}
+              <button
+                className={styles.sleepBtn}
+                onClick={setSleepEndOfTrack}
+                data-testid="sleep-end-of-track"
+              >
+                End of track
+              </button>
+            </div>
+          ) : (
+            <div className={styles.sleepActive} data-testid="sleep-active">
+              <span className={styles.sleepRemaining}>{formatRemaining(sleep)}</span>
+              <button className={styles.sleepBtn} onClick={cancelSleep} data-testid="sleep-cancel">
+                Cancel
+              </button>
+            </div>
+          )}
         </section>
 
         <section className={styles.section}>

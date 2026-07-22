@@ -30,6 +30,7 @@ import { usePlaylists } from './state/playlists'
 import { useEq } from './state/eq'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useDesktopIntegration } from './hooks/useDesktopIntegration'
+import { useSessionAndTimers } from './hooks/useSessionAndTimers'
 import styles from './App.module.css'
 
 const VIEW_TITLES: Record<string, string> = {
@@ -68,6 +69,7 @@ export default function App(): React.JSX.Element {
   const addToQueue = usePlayer((s) => s.addToQueue)
   useKeyboardShortcuts()
   useDesktopIntegration()
+  useSessionAndTimers()
 
   const {
     playlists, openId: openPlaylistId, openTracks: playlistTracks, lastImport,
@@ -342,6 +344,10 @@ export default function App(): React.JSX.Element {
             onSettingsChanged={(changed) => {
               if (typeof changed.showVisualizer === 'boolean') {
                 setShowVisualizer(changed.showVisualizer)
+              }
+              // Crossfade must reach the live audio graph, not just settings.
+              if (typeof changed.crossfadeSec === 'number') {
+                usePlayer.getState().setCrossfade(changed.crossfadeSec)
               }
             }}
           />

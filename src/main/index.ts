@@ -11,6 +11,8 @@ import { registerDesktopIpc } from './ipc/desktop'
 import { createTray, destroyTray } from './tray'
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './shortcuts'
 import { closeMiniPlayer } from './windows/mini'
+import { startWatching, stopWatching } from './scan/watcher'
+import { scanFolders } from './scan/controller'
 import { registerProtocolHandlers, registerSchemes } from './protocol'
 
 // Must run before app.whenReady() — privileged scheme registration is only
@@ -68,6 +70,8 @@ if (!app.requestSingleInstanceLock()) {
     // Registration failures are captured, not thrown: media keys are commonly
     // owned by another app, and that is surfaced in Settings rather than
     // crashing or silently doing nothing.
+    startFolderWatching()
+
     const shortcuts = registerGlobalShortcuts()
     const failed = shortcuts.filter((s) => !s.registered)
     if (failed.length) {
@@ -91,6 +95,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     markQuitting()
+    stopWatching()
     unregisterGlobalShortcuts()
     closeMiniPlayer()
     destroyTray()
@@ -98,6 +103,44 @@ if (!app.requestSingleInstanceLock()) {
 
   // Close the DB cleanly so WAL is checkpointed rather than left for recovery.
   app.on('will-quit', closeDb)
+}
+
+/**
+ * Watches every folder the user has added, when enabled.
+ *
+ * New files are handed to the ordinary scanner, so they go through exactly the
+ * same metadata, artwork and inference path as a manual scan — a second code
+ * path here would drift.
+ */
+export function startFolderWatching(): void {
+  stopWatching()
+  if (!getSetting('watchFolders')) return
+
+  try {
+    const folders = getDb()
+      .all<{ path: string }>('SELECT path FROM watched_folders')
+      .map((r) => r.path)
+    if (folders.length === 0) return
+
+    startWatching(folders, {
+      onChanged: async (paths) => {
+        try {
+          await scanFolders(paths, {
+            onProgress: (progress) => {
+              for (const win of BrowserWindow.getAllWindows()) {
+                if (!win.isDestroyed()) win.webContents.send(IPC.LIB_SCAN_PROGRESS, progress)
+              }
+            }
+          })
+        } catch {
+          /* a scan already running; the next filesystem event will retry */
+        }
+      }
+    })
+    console.log(`[watch] watching ${folders.length} folder(s)`)
+  } catch {
+    /* watching is a convenience; never let it prevent startup */
+  }
 }
 
 function sqliteVersion(): string | null {
@@ -128,6 +171,8 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.SETTINGS_SET, (_e, key: keyof Settings, value: Settings[keyof Settings]) => {
     setSetting(key, value as never)
+    // Toggling folder watching must take effect immediately, not next launch.
+    if (key === 'watchFolders') startFolderWatching()
     return getSetting(key)
   })
 
