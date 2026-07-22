@@ -1,10 +1,11 @@
 # Status
 
-Version **0.1.4** · 271 unit tests, 113 e2e tests, all passing · shipped and in
+Version **0.2.0** · 271 unit tests, 113 e2e tests, all passing · shipped and in
 daily use.
 
-Unreleased on `master`: track selection, drag-to-playlist, and the tag editor
-(write core plus dialog). Not yet released — that is the remaining work.
+0.2.0 added track selection, drag-to-playlist, and the tag editor (write core
+plus dialog). Released via the tagged Actions pipeline; auto-update offered from
+0.1.4.
 
 Everything in the original spec is built except smart playlists, which were cut
 deliberately. What follows is what is *not* done, what is known-broken, and what
