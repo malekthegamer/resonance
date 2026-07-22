@@ -1,5 +1,5 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { launchApp } from './helpers'
+import { launchApp, TEST_USER_DATA } from './helpers'
 
 /**
  * Slice 1 exit criterion: the library database must be proven to work *inside
@@ -32,11 +32,10 @@ test('the database is open, migrated, and in WAL mode inside Electron', async ()
   // discards the library on quit.
   expect(info.path).toMatch(/library\.db$/)
 
-  // Under a userData directory named for the app. Electron defaults this to
-  // "Electron" in development, which would put the dev library somewhere
-  // different from the packaged one — and relocating it later orphans a real
-  // user's library.
-  expect(info.path).toContain('Resonance')
+  // Inside the userData directory the app was launched with. Asserting the
+  // literal name "Resonance" only held when no --user-data-dir was passed, so it
+  // failed on CI where the tests always supply one.
+  expect(info.path.toLowerCase()).toContain(TEST_USER_DATA.toLowerCase())
 })
 
 test('every table the app depends on exists in the real app database', async () => {

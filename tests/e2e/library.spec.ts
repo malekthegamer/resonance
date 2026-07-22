@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
+import { BULK_TERM, ensureBulkFixtures, ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
 import { launchApp } from './helpers'
 
 /** Slice 3: library views rendered against the real scanned library. */
@@ -12,9 +12,11 @@ let page: Page
 
 test.beforeAll(async () => {
   ensureFixtures()
+  // Enough tracks that windowing is observable and search has targets, without
+  // depending on whatever music happens to be on the machine.
+  ensureBulkFixtures()
   ;({ app, page } = await launchApp())
 
-  // Make sure there is a library to render, whatever order suites ran in.
   const roots = [FIXTURE_DIR]
   const music = join(homedir(), 'Music')
   if (existsSync(music)) roots.push(music)
@@ -41,9 +43,10 @@ test('only visible rows are mounted — the list is virtualized', async () => {
   const total = await page.evaluate(() => window.resonance.library.getTracks().then((t) => t.length))
   const mounted = await page.getByTestId('track-row').count()
 
-  // With ~61 tracks and a ~46px row height, a windowed list mounts far fewer
-  // rows than the library holds. If this ever equals `total`, virtualization has
-  // silently stopped working and large libraries will jank.
+  // A windowed list mounts far fewer rows than the library holds. If this ever
+  // equals `total`, virtualization has silently stopped working and large
+  // libraries will jank.
+  expect(total, 'need enough tracks for windowing to be observable').toBeGreaterThan(30)
   expect(mounted).toBeLessThan(total)
   expect(mounted).toBeGreaterThan(5)
 })
@@ -81,9 +84,10 @@ test('Albums, Artists and Genres views render and drill down', async () => {
 })
 
 test('search narrows the library through the FTS index', async () => {
-  await page.getByTestId('search').fill('titan')
+  await page.getByTestId('search').fill(BULK_TERM)
   await expect(page.getByTestId('view-title')).toContainText('Search')
 
+  await expect.poll(async () => page.getByTestId('track-row').count()).toBeGreaterThan(0)
   const hits = await page.getByTestId('track-row').count()
   expect(hits).toBeGreaterThan(0)
   await page.screenshot({ path: 'test-results/slice3-search.png' })

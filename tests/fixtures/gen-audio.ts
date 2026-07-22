@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, openSync, closeSync, writeSync, statSync } from 'node:fs'
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  statSync,
+  writeSync
+} from 'node:fs'
 import { join } from 'node:path'
 import ffmpegPath from 'ffmpeg-static'
 
@@ -193,6 +201,33 @@ export function ensureFixtures(opts: { large?: boolean } = {}): Fixtures {
   }
 
   return p
+}
+
+/**
+ * Directory of many tiny tracks, so tests that need a realistically sized
+ * library work anywhere.
+ *
+ * Virtualization and search were originally asserted against the developer's own
+ * music folder, which meant they could only ever pass on one machine — they
+ * failed the moment CI ran them. Copies of one small WAV are enough: the tests
+ * care about row counts and searchable titles, not audio content.
+ */
+export const BULK_DIR = join(FIXTURE_DIR, 'bulk')
+export const BULK_COUNT = 40
+/** Every bulk track's title contains this, so search has a reliable target. */
+export const BULK_TERM = 'Bulktrack'
+
+export function ensureBulkFixtures(): string {
+  mkdirSync(BULK_DIR, { recursive: true })
+  const source = fixturePaths().tone
+  if (!existsSync(source)) ensureFixtures()
+
+  for (let i = 0; i < BULK_COUNT; i++) {
+    const target = join(BULK_DIR, `${BULK_TERM} ${String(i).padStart(3, '0')}.wav`)
+    if (existsSync(target) && statSync(target).size > 1024) continue
+    copyFileSync(source, target)
+  }
+  return BULK_DIR
 }
 
 /** Size report, used by the fixture test to print real evidence. */

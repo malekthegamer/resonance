@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
+import { BULK_TERM, ensureBulkFixtures, ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
 import { launchApp } from './helpers'
 
 /**
@@ -22,6 +22,7 @@ let page: Page
 
 test.beforeAll(async () => {
   ensureFixtures()
+  ensureBulkFixtures()
   ;({ app, page } = await launchApp())
 
   const roots = [FIXTURE_DIR]
@@ -37,7 +38,7 @@ test.afterAll(async () => {
 })
 
 test('library sections respond while a search is active', async () => {
-  await page.getByTestId('search').fill('tone')
+  await page.getByTestId('search').fill(BULK_TERM)
   await expect(page.getByTestId('view-title')).toContainText('Search')
 
   // The reported symptom: clicking Albums during a search appeared to do nothing.
@@ -153,7 +154,9 @@ test('an empty rename keeps the old name rather than blanking it', async () => {
 test('albums, artists and genres are a single Unknown bucket again', async () => {
   // Inference was reverted: the app no longer guesses structure it cannot verify.
   const tracks = await page.evaluate(() => window.resonance.library.getTracks())
-  const real = tracks.filter((t) => !t.path.includes('fixtures'))
+  // Bulk fixtures are untagged, so they exercise the Unknown-bucket behaviour
+  // on any machine.
+  const real = tracks.filter((t) => t.path.includes('bulk'))
 
   for (const t of real) {
     expect(t.album, `${t.title} should have no guessed album`).toBe('')
@@ -161,16 +164,16 @@ test('albums, artists and genres are a single Unknown bucket again', async () =>
   }
 
   // Titles keep the full filename, which is how an untagged library is browsed.
-  const titan = real.find((t) => t.path.includes('Guren'))
-  if (titan) {
-    expect(titan.title).toContain('Attack on Titan')
-  }
+  const bulk = tracks.find((t) => t.path.includes('bulk'))
+  if (bulk) expect(bulk.title).toContain('Bulktrack')
 })
 
-test('searching by series name still finds tracks', async () => {
-  // This regressed under inference: the series had been stripped out of titles.
-  const hits = await page.evaluate(() => window.resonance.library.search('titan'))
-  expect(hits.length, 'searching a series name must find its tracks').toBeGreaterThan(0)
+test('searching a filename term still finds tracks', async () => {
+  // This regressed under inference, which stripped words out of titles. Uses a
+  // generated fixture term so it holds on any machine, not just one with a
+  // particular music collection.
+  const hits = await page.evaluate((term) => window.resonance.library.search(term), BULK_TERM)
+  expect(hits.length, 'searching a filename term must find its tracks').toBeGreaterThan(0)
 })
 
 test('library sections respond while Now Playing is open', async () => {
@@ -215,8 +218,8 @@ test('deleting a playlist asks first and can be cancelled', async () => {
 
 test('search stays responsive and lands on the final query', async () => {
   // Debounced search must not leave results for an intermediate prefix.
-  await page.getByTestId('search').pressSequentially('titan', { delay: 30 })
-  await expect(page.getByTestId('view-title')).toContainText('titan')
+  await page.getByTestId('search').pressSequentially(BULK_TERM, { delay: 30 })
+  await expect(page.getByTestId('view-title')).toContainText(BULK_TERM)
   await expect.poll(async () => page.getByTestId('track-row').count()).toBeGreaterThan(0)
 
   await page.getByTestId('nav-songs').click()
