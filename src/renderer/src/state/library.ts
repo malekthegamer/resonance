@@ -27,6 +27,9 @@ interface LibraryState {
 }
 
 let searchToken = 0
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+/** Long enough to skip intermediate keystrokes, short enough to feel instant. */
+const SEARCH_DEBOUNCE_MS = 120
 
 export const useLibrary = create<LibraryState>((set, get) => ({
   tracks: [],
@@ -45,8 +48,18 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     set({ tracks, loading: false })
   },
 
+  /**
+   * Switches library section.
+   *
+   * Clears the search as well as the drill-down. Without that, clicking
+   * "Albums" while a search was active changed `view` but the search results
+   * kept rendering, so the sidebar looked completely unresponsive — the click
+   * registered and nothing happened. Media players clear the search when you
+   * navigate, and so does this.
+   */
   setView(view) {
-    set({ view, focus: null })
+    searchToken++ // abandon any in-flight search so a late reply cannot restore it
+    set({ view, focus: null, query: '', searchResults: null })
   },
 
   setFocus(focus) {
@@ -55,13 +68,26 @@ export const useLibrary = create<LibraryState>((set, get) => ({
 
   async setQuery(query) {
     set({ query })
+    if (searchTimer) clearTimeout(searchTimer)
+
     if (!query.trim()) {
+      searchToken++
       set({ searchResults: null })
       return
     }
-    // Searches are async and can land out of order; only the newest result wins,
-    // otherwise a slow early query overwrites a fast later one.
+
+    // Debounced: without it every keystroke costs an IPC round trip and a full
+    // re-render of the results list.
+    //
+    // Searches are also async and can land out of order, so only the newest
+    // result is allowed to win — otherwise a slow early query overwrites a fast
+    // later one and the list shows results for a prefix the user already edited.
     const token = ++searchToken
+    await new Promise<void>((resolve) => {
+      searchTimer = setTimeout(resolve, SEARCH_DEBOUNCE_MS)
+    })
+    if (token !== searchToken) return
+
     const results = await window.resonance.library.search(query)
     if (token === searchToken) set({ searchResults: results })
   },

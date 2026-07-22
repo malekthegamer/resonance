@@ -182,21 +182,36 @@ function compactPositions(db: Db, playlistId: number): void {
 }
 
 /**
+ * Builds a lookup from normalized path to track id.
+ *
+ * Imported playlists routinely reference files with different case or slash
+ * direction from the scanned path, so matching needs normalization. This is a
+ * single pass in JavaScript rather than a query per entry: the previous version
+ * normalized inside SQL and used double-quoted string literals, which SQLite
+ * resolves as *identifiers* first — `"/"` was parsed as a column name and the
+ * whole import failed with `no such column: "/"`.
+ */
+export function buildPathIndex(db: Db): Map<string, number> {
+  const index = new Map<string, number>()
+  for (const row of db.all<{ id: number; path: string }>('SELECT id, path FROM tracks')) {
+    index.set(normalizePath(row.path), row.id)
+  }
+  return index
+}
+
+/** Canonical form for comparison: forward slashes, lowercase. */
+export function normalizePath(path: string): string {
+  return path.split('\\').join('/').toLowerCase()
+}
+
+/**
  * Resolves a filesystem path to a track id.
  *
- * Imported playlists routinely reference files by a path that differs in case or
- * separator from the scanned one, so an exact match is tried first and a
- * normalized comparison second. Falling back to filename alone is deliberately
- * NOT done: two different albums can hold a "01 Intro.mp3".
+ * Falling back to filename alone is deliberately NOT done: two different albums
+ * can each hold a "01 Intro.mp3".
  */
 export function findTrackByPath(db: Db, path: string): number | null {
   const exact = db.get<{ id: number }>('SELECT id FROM tracks WHERE path = ?', [path])
   if (exact) return exact.id
-
-  const normalized = path.replace(/\//g, '\\').toLowerCase()
-  const row = db.get<{ id: number }>(
-    'SELECT id FROM tracks WHERE lower(replace(path, "/", "\\")) = ?',
-    [normalized]
-  )
-  return row?.id ?? null
+  return buildPathIndex(db).get(normalizePath(path)) ?? null
 }

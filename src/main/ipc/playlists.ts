@@ -6,9 +6,10 @@ import type { Track } from '@shared/types'
 import { getDb } from '../db/open'
 import {
   addTracksToPlaylist,
+  buildPathIndex,
   createPlaylist,
   deletePlaylist,
-  findTrackByPath,
+  normalizePath,
   getPlaylistTracks,
   listPlaylists,
   removeFromPlaylist,
@@ -87,10 +88,12 @@ export function registerPlaylistIpc(): void {
       const name = parsed.name ?? basename(file).replace(/\.m3u8?$/i, '')
       const playlistId = createPlaylist(db, name)
 
+      // One index for the whole import rather than a query per entry.
+      const index = buildPathIndex(db)
       const ids: number[] = []
       const missingPaths: string[] = []
       for (const entry of parsed.entries) {
-        const id = findTrackByPath(db, entry.path)
+        const id = index.get(normalizePath(entry.path))
         if (id) ids.push(id)
         else missingPaths.push(entry.path)
       }

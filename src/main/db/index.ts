@@ -87,7 +87,45 @@ export function openDatabase(filename: string): Db {
   }
 
   migrate(db)
+  repairInferredTitles(db)
   return db
+}
+
+/**
+ * Restores filename-derived titles that filename *inference* had shortened.
+ *
+ * Inference stripped the series name out of titles — "Attack on Titan OP 1
+ * Guren no Yumiya" became "Guren no Yumiya" — which broke searching for the
+ * series entirely. For an untagged library the full filename IS the identity of
+ * the track, so it is restored here.
+ *
+ * Written in TypeScript rather than migration SQL because extracting a basename
+ * in SQLite requires rtrim/replace contortions that are hard to read and easy to
+ * get wrong on edge cases. Idempotent and cheap: it only rewrites rows that
+ * actually differ, so it is safe to run on every open.
+ */
+export function repairInferredTitles(db: Db): number {
+  let rows: Array<{ id: number; path: string; title: string }>
+  try {
+    rows = db.all<{ id: number; path: string; title: string }>(
+      'SELECT id, path, title FROM tracks WHERE title_inferred = 1'
+    )
+  } catch {
+    // Column does not exist yet on a database older than migration 2.
+    return 0
+  }
+  if (rows.length === 0) return 0
+
+  let fixed = 0
+  db.transaction(() => {
+    for (const row of rows) {
+      const base = (row.path.split(/[\\/]/).pop() ?? '').replace(/\.[^.]+$/, '')
+      if (!base || base === row.title) continue
+      db.run('UPDATE tracks SET title = ? WHERE id = ?', [base, row.id])
+      fixed++
+    }
+  })
+  return fixed
 }
 
 /**

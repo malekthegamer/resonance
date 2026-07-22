@@ -8,7 +8,8 @@ import {
   IconPlus,
   IconRecent,
   IconSongs,
-  IconPlaylist
+  IconPlaylist,
+  IconImport
 } from './Icons'
 import styles from './Sidebar.module.css'
 
@@ -21,18 +22,24 @@ const VIEWS: Array<{ id: ViewId; label: string; Icon: (p: { size?: number }) => 
 ]
 
 interface SidebarProps {
+  onNavigate(view: ViewId): void
   onOpenPlaylist(id: number): void
   onPlaylistContextMenu(e: React.MouseEvent, id: number, name: string): void
   openPlaylistId: number | null
+  /** Playlist currently being renamed inline, driven from the context menu. */
+  renamingId: number | null
+  onRenamingChange(id: number | null): void
 }
 
 export function Sidebar({
+  onNavigate,
   onOpenPlaylist,
   onPlaylistContextMenu,
-  openPlaylistId
+  openPlaylistId,
+  renamingId,
+  onRenamingChange
 }: SidebarProps): React.JSX.Element {
   const view = useLibrary((s) => s.view)
-  const setView = useLibrary((s) => s.setView)
   const scanFolders = useLibrary((s) => s.scanFolders)
   const trackCount = useLibrary((s) => s.tracks.length)
 
@@ -40,8 +47,25 @@ export function Sidebar({
   const refreshPlaylists = usePlaylists((s) => s.refresh)
   const createPlaylist = usePlaylists((s) => s.create)
   const importFiles = usePlaylists((s) => s.importFiles)
+  const renamePlaylist = usePlaylists((s) => s.rename)
   const [creating, setCreating] = useState(false)
   const [draftName, setDraftName] = useState('')
+  const [renameDraft, setRenameDraft] = useState('')
+
+  // Seed the rename field when a rename starts, so the existing name is there
+  // to edit rather than an empty box.
+  useEffect(() => {
+    if (renamingId == null) return
+    setRenameDraft(playlists.find((p) => p.id === renamingId)?.name ?? '')
+  }, [renamingId, playlists])
+
+  async function commitRename(): Promise<void> {
+    const id = renamingId
+    const name = renameDraft.trim()
+    onRenamingChange(null)
+    if (id == null || !name) return
+    await renamePlaylist(id, name)
+  }
 
   useEffect(() => {
     void refreshPlaylists()
@@ -63,10 +87,10 @@ export function Sidebar({
         {VIEWS.map((v) => (
           <li key={v.id}>
             <button
-              className={`${styles.item} ${view === v.id ? styles.active : ''}`}
-              onClick={() => setView(v.id)}
+              className={`${styles.item} ${view === v.id && openPlaylistId == null ? styles.active : ''}`}
+              onClick={() => onNavigate(v.id)}
               data-testid={`nav-${v.id}`}
-              aria-current={view === v.id ? 'page' : undefined}
+              aria-current={view === v.id && openPlaylistId == null ? 'page' : undefined}
             >
               <span className={styles.icon} aria-hidden>
                 <v.Icon size={16} />
@@ -87,7 +111,7 @@ export function Sidebar({
             aria-label="Import playlist"
             data-testid="import-playlist"
           >
-            ↧
+            <IconImport size={14} />
           </button>
           <button
             className={styles.plAction}
@@ -124,10 +148,26 @@ export function Sidebar({
         )}
         {playlists.map((pl) => (
           <li key={pl.id}>
+            {renamingId === pl.id ? (
+              <input
+                className={styles.newInput}
+                autoFocus
+                value={renameDraft}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onBlur={() => void commitRename()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitRename()
+                  if (e.key === 'Escape') onRenamingChange(null)
+                }}
+                data-testid="playlist-rename-input"
+                aria-label="Rename playlist"
+              />
+            ) : (
             <button
               className={`${styles.item} ${openPlaylistId === pl.id ? styles.active : ''}`}
               onClick={() => onOpenPlaylist(pl.id)}
               onContextMenu={(e) => onPlaylistContextMenu(e, pl.id, pl.name)}
+              onDoubleClick={() => onRenamingChange(pl.id)}
               data-testid="playlist-item"
               title={pl.name}
             >
@@ -137,6 +177,7 @@ export function Sidebar({
               <span className={styles.plName}>{pl.name}</span>
               <span className={styles.plCount}>{pl.trackCount}</span>
             </button>
+            )}
           </li>
         ))}
       </ul>

@@ -1,5 +1,4 @@
 import type { Track } from '@shared/types'
-import { canonicalizeAlbums } from '../scan/infer'
 import type { Db } from './index'
 
 /** Row shape as stored; snake_case straight from SQLite. */
@@ -218,59 +217,6 @@ export function searchTracks(db: Db, query: string, limit = 500): Track[] {
       [match, limit]
     )
     .map(rowToTrack)
-}
-
-/**
- * Collapses inferred album-name variants into one canonical name per series.
- *
- * Runs after a scan, over the whole library at once, because deciding that
- * "ReZero" and "Re ZERO - Starting Life in Another World" are the same album
- * needs a global view that a per-file parser cannot have.
- *
- * Restricted to album_inferred = 1. Real album tags are never rewritten.
- */
-export function canonicalizeInferredAlbums(db: Db): number {
-  const rows = db.all<{ album: string }>(
-    "SELECT DISTINCT album FROM tracks WHERE album_inferred = 1 AND album <> ''"
-  )
-  if (rows.length === 0) return 0
-
-  const mapping = canonicalizeAlbums(rows.map((r) => r.album))
-  let changed = 0
-
-  db.transaction(() => {
-    for (const [original, canonical] of mapping) {
-      if (original === canonical) continue
-      changed += db.run('UPDATE tracks SET album = ? WHERE album = ? AND album_inferred = 1', [
-        canonical,
-        original
-      ]).changes
-    }
-
-    // An inferred "artist" that is really the series name is noise — it comes
-    // from filenames like "Re Zero - Ending 2" where the left side is the show,
-    // not a performer. Left in place it pollutes the Artists view and, because
-    // albums are keyed by album + album artist, splits one album into several.
-    db.run(`
-      UPDATE tracks SET artist = '', artist_inferred = 0
-      WHERE artist_inferred = 1
-        AND album_inferred = 1
-        AND lower(replace(replace(artist, ' ', ''), '-', '')) =
-            lower(replace(replace(album,  ' ', ''), '-', ''))
-    `)
-
-    // Give every inferred album one stable album artist. Without this, tracks
-    // that happened to yield a performer ("… by Snow Man") group separately from
-    // their album-mates, so one album renders as two tiles. "Various Artists" is
-    // the conventional label for exactly this case — a per-series collection of
-    // openings and endings by different performers — and per-track artists are
-    // still shown on each row.
-    db.run(
-      "UPDATE tracks SET album_artist = 'Various Artists' WHERE album_inferred = 1 AND album <> ''"
-    )
-  })
-
-  return changed
 }
 
 /** Marks tracks whose files no longer exist, rather than deleting them. */

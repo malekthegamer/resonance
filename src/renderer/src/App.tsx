@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Theme, Track } from '@shared/types'
+import type { ViewId } from './state/library'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
@@ -14,6 +15,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { ContextMenu, type MenuItem } from './components/ContextMenu'
 import { TrackProperties } from './components/TrackProperties'
 import { Toast } from './components/Toast'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import {
   albumKeyFor,
   artistKeyFor,
@@ -54,6 +56,8 @@ export default function App(): React.JSX.Element {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [properties, setProperties] = useState<Track | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [renamingPlaylistId, setRenamingPlaylistId] = useState<number | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null)
   const [showVisualizer, setShowVisualizer] = useState(true)
 
   const {
@@ -74,7 +78,7 @@ export default function App(): React.JSX.Element {
   const {
     playlists, openId: openPlaylistId, openTracks: playlistTracks, lastImport,
     open: openPlaylist, refresh: refreshPlaylists, addTracks: addToPlaylist,
-    remove: removePlaylist, rename: renamePlaylist, exportPlaylist,
+    remove: removePlaylist, exportPlaylist,
     importFiles, removeAt: removeFromPlaylist, clearImportNotice
   } = usePlaylists()
 
@@ -142,11 +146,30 @@ export default function App(): React.JSX.Element {
     [playTracks]
   )
 
+  /**
+   * Selecting a library section must also close any open playlist. `showingGrid`
+   * requires no playlist to be open, so without this, clicking "Albums" while a
+   * playlist was open did nothing visible.
+   */
+  const navigateTo = useCallback(
+    (next: ViewId) => {
+      void openPlaylist(null)
+      setView(next)
+      // The Now Playing screen replaces the whole content area, so leaving it
+      // open would make the sidebar look unresponsive for a third time.
+      setPanel((p) => (p === 'now' ? null : p))
+    },
+    [openPlaylist, setView]
+  )
+
   const openPlaylistById = useCallback(
     (id: number) => {
+      // Clear search and drill-down, or the playlist would be rendered behind
+      // whatever the search was showing.
       setView('songs')
       setFocus(null)
       void openPlaylist(id)
+      setPanel((p) => (p === 'now' ? null : p))
     },
     [openPlaylist, setFocus, setView]
   )
@@ -197,11 +220,11 @@ export default function App(): React.JSX.Element {
       },
       { separator: true, label: '' },
       {
+        // Renames inline in the sidebar. window.prompt() was used here first and
+        // silently threw — Electron does not implement it, so the menu item
+        // appeared to do nothing at all.
         label: 'Rename…',
-        onSelect: () => {
-          const next = window.prompt('Rename playlist', name)
-          if (next) void renamePlaylist(id, next)
-        }
+        onSelect: () => setRenamingPlaylistId(id)
       },
       {
         label: 'Export as M3U8…',
@@ -211,7 +234,11 @@ export default function App(): React.JSX.Element {
         }
       },
       { separator: true, label: '' },
-      { label: 'Delete playlist', danger: true, onSelect: () => void removePlaylist(id) }
+      {
+        label: 'Delete playlist',
+        danger: true,
+        onSelect: () => setConfirmDelete({ id, name })
+      }
     ]
   }
 
@@ -256,10 +283,20 @@ export default function App(): React.JSX.Element {
       className={styles.shell}
       onDragOver={(e) => {
         e.preventDefault()
-        setDragging(true)
+        if (!dragging) setDragging(true)
       }}
       onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false)
+        // dragleave also fires when the pointer moves onto a child element, so
+        // the overlay used to stick on permanently. Clearing only when the
+        // pointer has actually left the window bounds is reliable.
+        if (
+          e.clientX <= 0 ||
+          e.clientY <= 0 ||
+          e.clientX >= window.innerWidth ||
+          e.clientY >= window.innerHeight
+        ) {
+          setDragging(false)
+        }
       }}
       onDrop={(e) => void onDrop(e)}
     >
@@ -267,12 +304,15 @@ export default function App(): React.JSX.Element {
 
       <div className={styles.body}>
         <Sidebar
+          onNavigate={navigateTo}
           onOpenPlaylist={openPlaylistById}
           onPlaylistContextMenu={(e, id, name) => {
             e.preventDefault()
             setMenu({ x: e.clientX, y: e.clientY, items: playlistMenuItems(id, name) })
           }}
           openPlaylistId={openPlaylistId}
+          renamingId={renamingPlaylistId}
+          onRenamingChange={setRenamingPlaylistId}
         />
 
         <main className={styles.content}>
@@ -369,6 +409,18 @@ export default function App(): React.JSX.Element {
         <TrackProperties track={properties} onClose={() => setProperties(null)} />
       )}
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete playlist?"
+          body={`“${confirmDelete.name}” will be removed. The tracks themselves stay in your library.`}
+          confirmLabel="Delete"
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            void removePlaylist(confirmDelete.id)
+            setConfirmDelete(null)
+          }}
+        />
+      )}
 
       {dragging && (
         <div className={styles.dropOverlay} data-testid="drop-overlay">

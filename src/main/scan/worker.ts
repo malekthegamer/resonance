@@ -4,7 +4,6 @@ import { parentPort, workerData } from 'node:worker_threads'
 import { parseFile } from 'music-metadata'
 import { EXTENSION_FORMATS } from '@shared/types'
 import { storeArtwork } from './art'
-import { inferFromFilename } from './infer'
 
 /**
  * Scan worker.
@@ -163,21 +162,25 @@ async function run(): Promise<void> {
         artRef = stored?.ref ?? null
       }
 
-      // Real tags always win; inference only fills fields the file left empty.
+      /*
+       * Tags are used exactly as written, with one exception: a file with no
+       * title tag falls back to its filename, because a track with no name at
+       * all cannot be identified or clicked.
+       *
+       * Album, artist and genre are deliberately NOT guessed from the filename.
+       * Inference was tried and reverted: it produced plausible-looking but
+       * wrong groupings, and an untagged library is better served by explicit
+       * playlists than by the app inventing structure it cannot verify.
+       */
       const tagTitle = (c.title ?? '').trim()
       const tagArtist = (c.artist ?? '').trim()
       const tagAlbum = (c.album ?? '').trim()
       const tagGenre = firstString(c.genre).trim()
 
-      const needsInference = !tagTitle || !tagArtist || !tagAlbum || !tagGenre
-      const guess = needsInference
-        ? inferFromFilename(path)
-        : { title: '', album: '', artist: '', genre: '' }
-
-      const title = tagTitle || guess.title || titleFrom(undefined, path)
-      const artist = tagArtist || guess.artist
-      const album = tagAlbum || guess.album
-      const genre = tagGenre || guess.genre
+      const title = tagTitle || titleFrom(undefined, path)
+      const artist = tagArtist
+      const album = tagAlbum
+      const genre = tagGenre
 
       batch.push({
         path,
@@ -189,9 +192,9 @@ async function run(): Promise<void> {
         albumArtist: (c.albumartist ?? '').trim() || artist,
         genre,
         titleInferred: !tagTitle,
-        albumInferred: !tagAlbum && !!album,
-        artistInferred: !tagArtist && !!artist,
-        genreInferred: !tagGenre && !!genre,
+        albumInferred: false,
+        artistInferred: false,
+        genreInferred: false,
         year: typeof c.year === 'number' ? c.year : null,
         trackNo: c.track?.no ?? null,
         discNo: c.disk?.no ?? null,

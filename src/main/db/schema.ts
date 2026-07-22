@@ -9,7 +9,7 @@
  * is fast enough at library scale, and it cannot drift out of sync with reality.
  */
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /**
  * Each migration is applied in order and recorded. Index 0 creates the initial
@@ -115,5 +115,32 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE tracks ADD COLUMN artist_inferred INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tracks ADD COLUMN title_inferred INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tracks ADD COLUMN genre_inferred INTEGER NOT NULL DEFAULT 0;
+  `,
+
+  /* --- 3: undo filename inference --- */ `
+  -- Filename inference was tried and reverted. It produced plausible-looking but
+  -- unverifiable groupings, and an untagged library is better served by explicit
+  -- playlists than by the app inventing structure.
+  --
+  -- This has to be a migration rather than something a rescan fixes: the scanner
+  -- skips files whose mtime is unchanged, so inferred values would otherwise
+  -- survive in an existing library indefinitely.
+  --
+  -- Only ever touches rows the app itself guessed. Real tags are untouched.
+  UPDATE tracks
+     SET album = '', album_artist = '', genre = '',
+         album_inferred = 0, genre_inferred = 0
+   WHERE album_inferred = 1;
+
+  -- album_artist fell back to the (inferred) artist, so it carries guessed data
+  -- without a flag of its own and must be cleared alongside it.
+  UPDATE tracks
+     SET artist = '', album_artist = '', artist_inferred = 0
+   WHERE artist_inferred = 1;
+
+  -- The album_artist fallback also wrote "Various Artists" onto inferred albums.
+  UPDATE tracks
+     SET album_artist = ''
+   WHERE album_artist = 'Various Artists' AND album = '';
   `
 ]
