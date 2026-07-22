@@ -9,7 +9,7 @@
  * is fast enough at library scale, and it cannot drift out of sync with reality.
  */
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /**
  * Each migration is applied in order and recorded. Index 0 creates the initial
@@ -104,5 +104,16 @@ export const MIGRATIONS: readonly string[] = [
     INSERT INTO tracks_fts(rowid, title, artist, album)
     VALUES (new.id, new.title, new.artist, new.album);
   END;
+  `,
+
+  /* --- 2: mark which fields came from filename inference --- */ `
+  -- Tracks whose album name was guessed from the filename rather than read from
+  -- a tag. Only these are eligible for canonicalization: two genuinely distinct
+  -- tagged albums may legitimately share a name prefix, and rewriting a real
+  -- tag would be destroying user data.
+  ALTER TABLE tracks ADD COLUMN album_inferred INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tracks ADD COLUMN artist_inferred INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tracks ADD COLUMN title_inferred INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tracks ADD COLUMN genre_inferred INTEGER NOT NULL DEFAULT 0;
   `
 ]

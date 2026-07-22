@@ -3,7 +3,7 @@ import { Worker } from 'node:worker_threads'
 import { app } from 'electron'
 import { EMPTY_SCAN_PROGRESS, type ScanProgress } from '@shared/types'
 import { getDb } from '../db/open'
-import { getKnownMtimes, upsertTracks } from '../db/tracks'
+import { canonicalizeInferredAlbums, getKnownMtimes, upsertTracks } from '../db/tracks'
 import type { ParsedTrack, ScanWorkerData, WorkerMessage } from './worker'
 
 /**
@@ -73,6 +73,15 @@ export function scanFolders(roots: string[], cb: ScanCallbacks): Promise<ScanPro
     active = worker
 
     const finish = (phase: ScanProgress['phase']): void => {
+      // Merging album-name variants needs the whole library in view, so it runs
+      // once at the end rather than per file.
+      if (phase === 'done') {
+        try {
+          canonicalizeInferredAlbums(db)
+        } catch {
+          /* canonicalization is cosmetic; never fail a scan over it */
+        }
+      }
       progress.phase = phase
       progress.elapsedMs = Date.now() - started
       active = null

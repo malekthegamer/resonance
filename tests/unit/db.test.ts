@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase, type Db } from '../../src/main/db/index'
+import { SCHEMA_VERSION } from '../../src/main/db/schema'
 
 function makeTrack(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
@@ -51,7 +52,9 @@ describe('schema + migrations', () => {
   })
 
   it('records its version and is idempotent when re-run', () => {
-    expect(db.get<{ user_version: number }>('PRAGMA user_version')?.user_version).toBe(1)
+    expect(db.get<{ user_version: number }>('PRAGMA user_version')?.user_version).toBe(
+      SCHEMA_VERSION
+    )
     // Re-opening the same (in-memory) schema path must not throw or double-apply.
     expect(() => openDatabase(':memory:')).not.toThrow()
   })
