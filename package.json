@@ -1,6 +1,6 @@
 {
   "name": "resonance",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A modern desktop music player for Windows",
   "main": "./out/main/index.js",
   "author": "malek",
