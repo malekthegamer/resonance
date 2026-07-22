@@ -21,6 +21,12 @@ const SNAP_TOP_THRESHOLD_PX = 8
 
 let mainWindow: BrowserWindow | null = null
 let saveTimer: NodeJS.Timeout | null = null
+/** Set once a real quit is under way, so close-to-tray stops intercepting. */
+let isQuitting = false
+
+export function markQuitting(): void {
+  isQuitting = true
+}
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
@@ -145,9 +151,16 @@ export function createMainWindow(): BrowserWindow {
   })
 
   // Persist synchronously on close; the debounce may not have fired yet.
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (event) => {
     if (saveTimer) clearTimeout(saveTimer)
     persistWindowState()
+
+    // Minimize to tray instead of quitting, unless the app is genuinely
+    // shutting down (tray "Quit" calls app.exit, which bypasses this entirely).
+    if (getSetting('minimizeToTray') && !isQuitting) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
   })
 
   mainWindow.on('closed', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { EQ_MAX_GAIN_DB } from '../audio/engine'
 import { bandLabel } from '../audio/equalizer'
 import { useEq } from '../state/eq'
@@ -11,15 +11,16 @@ interface Props {
 
 export function EqualizerPanel({ onClose }: Props): React.JSX.Element {
   const {
-    gains, enabled, activePreset, hydrate, setBand, applyPreset, reset,
+    gains, enabled, activePreset, setBand, applyPreset, reset,
     setEnabled, saveCustom, deleteCustom, allPresets, customPresets
   } = useEq()
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState('')
 
-  useEffect(() => {
-    void hydrate()
-  }, [hydrate])
+  // Deliberately does NOT hydrate. The app hydrates once at startup; doing it
+  // again on mount raced with user input — opening the panel and immediately
+  // choosing a preset let the late hydrate overwrite the choice with the stored
+  // (flat) curve.
 
   async function commitSave(): Promise<void> {
     const name = draft.trim()

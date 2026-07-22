@@ -43,6 +43,8 @@ async function persist(state: {
   })
 }
 
+let hydrated = false
+
 export const useEq = create<EqState>((set, get) => ({
   enabled: true,
   gains: [...FLAT_GAINS],
@@ -50,6 +52,10 @@ export const useEq = create<EqState>((set, get) => ({
   activePreset: 'Flat',
 
   async hydrate() {
+    // Idempotent: a second hydrate would clobber whatever the user has since
+    // changed, because the read is async and lands later.
+    if (hydrated) return
+    hydrated = true
     const settings = await window.resonance.settings.getAll()
     const stored = settings.eq
     const gains = normalizeGains(stored?.gains)

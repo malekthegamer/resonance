@@ -138,6 +138,19 @@ export interface Settings {
   minimizeToTray: boolean
   showVisualizer: boolean
   watchFolders: boolean
+  miniPlayerPosition: { x: number; y: number } | null
+}
+
+/** Broadcast to the tray and mini-player whenever playback state changes. */
+export interface NowPlayingState {
+  trackId: number | null
+  title: string
+  artist: string
+  album: string
+  artRef: string | null
+  playing: boolean
+  positionSec: number
+  durationSec: number
 }
 
 export const DEFAULT_WINDOW_STATE: WindowState = {
@@ -158,5 +171,6 @@ export const DEFAULT_SETTINGS: Settings = {
   crossfadeSec: 0,
   minimizeToTray: true,
   showVisualizer: true,
-  watchFolders: true
+  watchFolders: true,
+  miniPlayerPosition: null
 }

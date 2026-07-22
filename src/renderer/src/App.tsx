@@ -10,6 +10,7 @@ import { PlayerBar } from './components/PlayerBar'
 import { QueuePanel } from './components/QueuePanel'
 import { EqualizerPanel } from './components/EqualizerPanel'
 import { NowPlaying } from './components/NowPlaying'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ContextMenu, type MenuItem } from './components/ContextMenu'
 import { TrackProperties } from './components/TrackProperties'
 import { Toast } from './components/Toast'
@@ -28,6 +29,7 @@ import { usePlayer } from './state/player'
 import { usePlaylists } from './state/playlists'
 import { useEq } from './state/eq'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { useDesktopIntegration } from './hooks/useDesktopIntegration'
 import styles from './App.module.css'
 
 const VIEW_TITLES: Record<string, string> = {
@@ -47,7 +49,7 @@ interface MenuState {
 export default function App(): React.JSX.Element {
   const [theme, setTheme] = useState<Theme>('dark')
   const [dragging, setDragging] = useState(false)
-  const [panel, setPanel] = useState<'queue' | 'eq' | 'now' | null>(null)
+  const [panel, setPanel] = useState<'queue' | 'eq' | 'now' | 'settings' | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [properties, setProperties] = useState<Track | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -65,6 +67,7 @@ export default function App(): React.JSX.Element {
   const hydrateEq = useEq((s) => s.hydrate)
   const addToQueue = usePlayer((s) => s.addToQueue)
   useKeyboardShortcuts()
+  useDesktopIntegration()
 
   const {
     playlists, openId: openPlaylistId, openTracks: playlistTracks, lastImport,
@@ -333,12 +336,24 @@ export default function App(): React.JSX.Element {
 
         {panel === 'queue' && <QueuePanel onClose={() => setPanel(null)} />}
         {panel === 'eq' && <EqualizerPanel onClose={() => setPanel(null)} />}
+        {panel === 'settings' && (
+          <SettingsPanel
+            onClose={() => setPanel(null)}
+            onSettingsChanged={(changed) => {
+              if (typeof changed.showVisualizer === 'boolean') {
+                setShowVisualizer(changed.showVisualizer)
+              }
+            }}
+          />
+        )}
       </div>
 
       <PlayerBar
         onOpenQueue={() => setPanel(panel === 'queue' ? null : 'queue')}
         onOpenEq={() => setPanel(panel === 'eq' ? null : 'eq')}
         onOpenNowPlaying={() => setPanel(panel === 'now' ? null : 'now')}
+        onOpenSettings={() => setPanel(panel === 'settings' ? null : 'settings')}
+        onToggleMiniPlayer={() => void window.resonance.desktop.toggleMiniPlayer()}
       />
 
       {menu && (

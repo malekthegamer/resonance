@@ -1,9 +1,17 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AppInfo, DbInfo, ScanProgress, Settings, Track } from '@shared/types'
+import type {
+  AppInfo,
+  DbInfo,
+  NowPlayingState,
+  ScanProgress,
+  Settings,
+  Track
+} from '@shared/types'
 import type { LibraryStats } from '../main/ipc/library'
 import type { ImportResult } from '../main/ipc/playlists'
 import type { PlaylistSummary } from '../main/db/playlists'
+import type { ShortcutStatus } from '../main/shortcuts'
 
 /**
  * The only bridge between main and renderer.
@@ -70,6 +78,65 @@ const api = {
   files: {
     getPaths: (files: File[]): string[] =>
       files.map((f) => webUtils.getPathForFile(f)).filter(Boolean)
+  },
+
+  desktop: {
+    /** Main window pushes now-playing state; main fans it out. */
+    publishNowPlaying: (state: NowPlayingState): void =>
+      ipcRenderer.send(IPC.NOW_PLAYING_CHANGED, state),
+    /** Main asks the audio-owning window to re-publish (mini-player opened). */
+    onNowPlayingRequest: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC.NOW_PLAYING_REQUEST, listener)
+      return () => ipcRenderer.removeListener(IPC.NOW_PLAYING_REQUEST, listener)
+    },
+    onNowPlaying: (cb: (s: NowPlayingState) => void): (() => void) => {
+      const listener = (_e: unknown, s: NowPlayingState): void => cb(s)
+      ipcRenderer.on(IPC.NOW_PLAYING_STATE, listener)
+      return () => ipcRenderer.removeListener(IPC.NOW_PLAYING_STATE, listener)
+    },
+
+    /** Media keys and tray commands arriving from main. */
+    onMediaCommand: (
+      cb: (command: 'playPause' | 'next' | 'previous' | 'stop' | 'volumeUp' | 'volumeDown') => void
+    ): (() => void) => {
+      const map: Array<[string, Parameters<typeof cb>[0]]> = [
+        [IPC.MEDIA_PLAY_PAUSE, 'playPause'],
+        [IPC.MEDIA_NEXT, 'next'],
+        [IPC.MEDIA_PREVIOUS, 'previous'],
+        [IPC.MEDIA_STOP, 'stop'],
+        [IPC.MEDIA_VOLUME_UP, 'volumeUp'],
+        [IPC.MEDIA_VOLUME_DOWN, 'volumeDown']
+      ]
+      const listeners = map.map(([channel, command]) => {
+        const l = (): void => cb(command)
+        ipcRenderer.on(channel, l)
+        return [channel, l] as const
+      })
+      return () => {
+        for (const [channel, l] of listeners) ipcRenderer.removeListener(channel, l)
+      }
+    },
+
+    /** Mini-player sends commands back to the window that owns audio. */
+    sendMediaCommand: (
+      command: 'playPause' | 'next' | 'previous' | 'stop' | 'volumeUp' | 'volumeDown'
+    ): void => {
+      const channels = {
+        playPause: IPC.MEDIA_PLAY_PAUSE,
+        next: IPC.MEDIA_NEXT,
+        previous: IPC.MEDIA_PREVIOUS,
+        stop: IPC.MEDIA_STOP,
+        volumeUp: IPC.MEDIA_VOLUME_UP,
+        volumeDown: IPC.MEDIA_VOLUME_DOWN
+      }
+      ipcRenderer.send(channels[command])
+    },
+
+    toggleMiniPlayer: (): Promise<boolean> => ipcRenderer.invoke(IPC.MINI_TOGGLE),
+    isMiniPlayerOpen: (): Promise<boolean> => ipcRenderer.invoke(IPC.MINI_IS_OPEN),
+    closeMiniPlayer: (): void => ipcRenderer.send(IPC.MINI_CLOSE),
+    shortcutStatus: (): Promise<ShortcutStatus[]> => ipcRenderer.invoke(IPC.SHORTCUT_STATUS)
   },
 
   settings: {

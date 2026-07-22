@@ -83,27 +83,48 @@ async function playTrackTitled(title: string): Promise<void> {
   }, title)
 }
 
-test('equalizer applies real gains to the audio graph', async () => {
-  await page.getByTestId('open-eq').click()
+/** Reads the live filter gains straight off the audio graph. */
+function readGains(): Promise<number[]> {
+  return page.evaluate(
+    () =>
+      (window as never as { __resonanceTestEngine: { getBandGains(): number[] } })
+        .__resonanceTestEngine.getBandGains()
+  )
+}
+
+/**
+ * Opens the equalizer panel if it is not already open.
+ *
+ * The button toggles, so tests must not assume a previous test left it open —
+ * blindly clicking it closed the panel and made later tests time out looking
+ * for controls that were no longer mounted.
+ */
+async function openEq(): Promise<void> {
+  if (!(await page.getByTestId('eq-panel').isVisible())) {
+    await page.getByTestId('open-eq').click()
+  }
   await expect(page.getByTestId('eq-panel')).toBeVisible()
+}
+
+test('equalizer applies real gains to the audio graph', async () => {
+  await openEq()
 
   // Ten sliders, matching the ten filters in the graph.
   await expect(page.locator('[data-testid^="eq-band-"]')).toHaveCount(10)
 
   await page.getByTestId('eq-preset').selectOption('Bass Boost')
 
-  const gains = await page.evaluate(
-    () =>
-      (window as never as { __resonanceTestEngine: { getBandGains(): number[] } })
-        .__resonanceTestEngine.getBandGains()
-  )
+  // Polled rather than read once: gains approach their target exponentially so
+  // that a change is not audible as a click, which means they are not yet at
+  // target the instant the preset is chosen.
+  await expect.poll(async () => (await readGains())[0], { timeout: 5000 }).toBeGreaterThan(3)
 
+  const gains = await readGains()
   // eslint-disable-next-line no-console
   console.log('\n=== EQ (Bass Boost) filter gains ===\n' + gains.map((g) => g.toFixed(1)).join(', ') + '\n')
 
   expect(gains).toHaveLength(10)
-  // The preset must actually reach the BiquadFilterNodes, not just the UI.
-  expect(gains[0]!).toBeGreaterThan(3)
+  // The preset must reach the BiquadFilterNodes, not just the UI.
   expect(gains[1]!).toBeGreaterThan(3)
   expect(gains[9]!).toBeCloseTo(0, 1)
 
@@ -124,6 +145,7 @@ test('equalizer filter frequencies match the spec', async () => {
 })
 
 test('a single band edit is audible in the graph immediately', async () => {
+  await openEq()
   await page.getByTestId('eq-preset').selectOption('Flat')
   await page.getByTestId('eq-band-4').fill('9')
   await page.getByTestId('eq-band-4').dispatchEvent('change')
@@ -140,6 +162,7 @@ test('a single band edit is audible in the graph immediately', async () => {
 })
 
 test('EQ state survives a reload', async () => {
+  await openEq()
   await page.getByTestId('eq-preset').selectOption('Rock')
   await page.waitForTimeout(200)
   await page.reload()
@@ -153,7 +176,7 @@ test('EQ state survives a reload', async () => {
 })
 
 test('bypassing the EQ flattens the graph without losing the curve', async () => {
-  await page.getByTestId('open-eq').click()
+  await openEq()
   await page.getByTestId('eq-preset').selectOption('Bass Boost')
   await page.getByTestId('eq-enabled').uncheck()
 

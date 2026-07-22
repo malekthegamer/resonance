@@ -1,0 +1,135 @@
+.mini {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-base);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Ambient wash, kept subtle at this size. */
+.mini::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ambient);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/*
+ * Drag handle covering the whole surface. Interactive children opt out via
+ * no-drag below, so buttons stay clickable on a frameless window.
+ */
+.dragRegion {
+  position: absolute;
+  inset: 0;
+  -webkit-app-region: drag;
+}
+
+.mini > *:not(.dragRegion) {
+  position: relative;
+  z-index: 1;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.meta {
+  display: grid;
+  min-width: 0;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artist {
+  font-size: 11px;
+  color: var(--text-lo);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progressRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.time {
+  font-size: 9.5px;
+  color: var(--text-lo);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+}
+
+.track {
+  flex: 1;
+  height: 3px;
+  border-radius: 99px;
+  background: rgb(255 255 255 / 0.14);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent-grad-h);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  -webkit-app-region: no-drag;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.ctl {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-mid);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.ctl:hover {
+  color: var(--text-hi);
+  background: var(--row-hover);
+}
+
+.play {
+  width: 30px;
+  height: 30px;
+  margin: 0 2px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent-grad);
+  box-shadow: 0 4px 14px rgb(var(--accent-b-rgb) / 0.42);
+}
+
+.play:hover {
+  filter: brightness(1.1);
+}

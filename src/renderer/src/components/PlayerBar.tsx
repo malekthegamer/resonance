@@ -13,7 +13,9 @@ import {
   IconShuffle,
   IconStop,
   IconVolume,
-  IconVolumeMuted
+  IconVolumeMuted,
+  IconMiniPlayer,
+  IconSettings
 } from './Icons'
 import styles from './PlayerBar.module.css'
 
@@ -114,9 +116,17 @@ interface Props {
   onOpenQueue(): void
   onOpenEq(): void
   onOpenNowPlaying(): void
+  onOpenSettings(): void
+  onToggleMiniPlayer(): void
 }
 
-export function PlayerBar({ onOpenQueue, onOpenEq, onOpenNowPlaying }: Props): React.JSX.Element {
+export function PlayerBar({
+  onOpenQueue,
+  onOpenEq,
+  onOpenNowPlaying,
+  onOpenSettings,
+  onToggleMiniPlayer
+}: Props): React.JSX.Element {
   const {
     current, playing, volume, muted, queue, error,
     toggle, next, previous, stop, setVolume, toggleMute, toggleShuffle, cycleRepeat, clearError
@@ -236,6 +246,24 @@ export function PlayerBar({ onOpenQueue, onOpenEq, onOpenNowPlaying }: Props): R
             data-testid="open-eq"
           >
             <IconEqualizer size={16} />
+          </button>
+          <button
+            className={styles.ctl}
+            onClick={onToggleMiniPlayer}
+            title="Mini player"
+            aria-label="Mini player"
+            data-testid="open-mini"
+          >
+            <IconMiniPlayer size={16} />
+          </button>
+          <button
+            className={styles.ctl}
+            onClick={onOpenSettings}
+            title="Settings"
+            aria-label="Settings"
+            data-testid="open-settings"
+          >
+            <IconSettings size={16} />
           </button>
           <button
             className={styles.ctl}

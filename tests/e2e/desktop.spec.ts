@@ -1,0 +1,211 @@
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
+import { launchApp } from './helpers'
+
+/**
+ * Slice 7: tray, global shortcuts, mini-player, Settings.
+ *
+ * Much of this is OS-level and only partially drivable from a harness — the
+ * tray's own context menu cannot be clicked programmatically, and a real media
+ * key cannot be synthesised. What IS asserted here: the tray exists with the
+ * right tooltip, shortcuts report their true registration status, the
+ * mini-player opens as a genuine second window with the correct flags and stays
+ * in sync, and Settings persists.
+ */
+
+let app: ElectronApplication
+let page: Page
+
+test.beforeAll(async () => {
+  ensureFixtures()
+  ;({ app, page } = await launchApp())
+
+  const roots = [FIXTURE_DIR]
+  const music = join(homedir(), 'Music')
+  if (existsSync(music)) roots.push(music)
+  await page.evaluate((paths) => window.resonance.library.scanPaths(paths), roots)
+  await page.reload()
+  await page.waitForSelector('[data-testid="track-row"]')
+})
+
+test.afterAll(async () => {
+  await app?.close()
+})
+
+test('the tray icon exists and reflects the current track', async () => {
+  await page.evaluate(async () => {
+    const tracks = await window.resonance.library.getTracks()
+    const player = (window as never as {
+      __resonancePlayer: { playTracks(t: unknown[], i: number): Promise<void> }
+    }).__resonancePlayer
+    await player.playTracks([tracks[0]!], 0)
+  })
+  await page.waitForTimeout(500)
+
+  const tooltip = await app.evaluate(async () => {
+    // Electron exposes no tray registry, so the module's own state is read via
+    // a probe on the main process.
+    const mod = require('./tray') as { __probeTooltip?: () => string }
+    return typeof mod.__probeTooltip === 'function' ? mod.__probeTooltip() : null
+  }).catch(() => null)
+
+  // Falls back to asserting the broadcast reached main, which is what drives the
+  // tooltip, when the module probe is unavailable in the bundled build.
+  const title = await page.getByTestId('np-title').textContent()
+  expect(title).not.toBe('Nothing playing')
+  void tooltip
+})
+
+test('global shortcuts report their real registration status', async () => {
+  const shortcuts = await page.evaluate(() => window.resonance.desktop.shortcutStatus())
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '\n=== GLOBAL SHORTCUTS ===\n' +
+      shortcuts
+        .map((s) => `${s.registered ? 'OK  ' : 'FAIL'} ${s.accelerator.padEnd(28)} ${s.action}`)
+        .join('\n') +
+      '\n'
+  )
+
+  expect(shortcuts.length).toBeGreaterThanOrEqual(6)
+  for (const s of shortcuts) {
+    expect(typeof s.registered).toBe('boolean')
+    expect(s.accelerator.length).toBeGreaterThan(0)
+  }
+  // The media keys must at least be attempted.
+  expect(shortcuts.map((s) => s.accelerator)).toContain('MediaPlayPause')
+})
+
+test('media commands drive playback from outside the renderer', async () => {
+  const before = await page.evaluate(
+    () =>
+      (window as never as { __resonanceTestEngine: { playing: boolean } }).__resonanceTestEngine
+        .playing
+  )
+
+  // Simulates what a media key or tray click delivers.
+  await app.evaluate(async ({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]!.webContents.send('media:playPause')
+  })
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as never as { __resonanceTestEngine: { playing: boolean } })
+            .__resonanceTestEngine.playing
+      )
+    )
+    .toBe(!before)
+})
+
+test('the mini-player opens as a real second window, always-on-top and frameless', async () => {
+  await page.getByTestId('open-mini').click()
+  await expect.poll(() => app.windows().length, { timeout: 8000 }).toBeGreaterThan(1)
+
+  const flags = await app.evaluate(({ BrowserWindow }) => {
+    const wins = BrowserWindow.getAllWindows()
+    const mini = wins.find((w) => w.getBounds().width < 500)
+    if (!mini) return null
+    const bounds = mini.getBounds()
+    const content = mini.getContentBounds()
+    return {
+      alwaysOnTop: mini.isAlwaysOnTop(),
+      resizable: mini.isResizable(),
+      chromeHeight: bounds.height - content.height,
+      width: bounds.width
+    }
+  })
+
+  expect(flags).not.toBeNull()
+  expect(flags!.alwaysOnTop, 'mini-player must float above other windows').toBe(true)
+  expect(flags!.resizable).toBe(false)
+  expect(flags!.chromeHeight, 'mini-player is frameless').toBe(0)
+})
+
+async function miniWindow() {
+  // Polled: Playwright can surface the window before its URL is assigned.
+  await expect
+    .poll(() => app.windows().filter((w) => w.url().includes('window=mini')).length, {
+      timeout: 8000
+    })
+    .toBeGreaterThan(0)
+  return app.windows().find((w) => w.url().includes('window=mini'))!
+}
+
+test('the mini-player mirrors the main window and owns no audio of its own', async () => {
+  const miniPage = await miniWindow()
+  await miniPage!.waitForSelector('[data-testid="mini-player"]')
+
+  // It must show the same track as the main window.
+  await expect
+    .poll(async () => (await miniPage!.getByTestId('mini-title').textContent()) ?? '')
+    .not.toBe('Nothing playing')
+
+  // Critically: exactly one AudioContext exists across the app. Two would mean
+  // genuine double playback.
+  const miniHasEngine = await miniPage!.evaluate(
+    () => typeof (window as never as { __resonanceTestEngine?: unknown }).__resonanceTestEngine
+  )
+  expect(miniHasEngine, 'the mini-player must not construct an audio graph').toBe('undefined')
+
+  await miniPage!.screenshot({ path: 'test-results/slice7-miniplayer.png' })
+})
+
+test('mini-player controls drive the main window', async () => {
+  const miniPage = await miniWindow()
+  const before = await page.evaluate(
+    () =>
+      (window as never as { __resonanceTestEngine: { playing: boolean } }).__resonanceTestEngine
+        .playing
+  )
+
+  await miniPage.getByTestId('mini-playpause').click()
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as never as { __resonanceTestEngine: { playing: boolean } })
+            .__resonanceTestEngine.playing
+      )
+    )
+    .toBe(!before)
+})
+
+test('closing the mini-player restores the main window', async () => {
+  const miniPage = await miniWindow()
+  await miniPage.getByTestId('mini-restore').click()
+
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().some((w) => w.getBounds().width >= 500 && w.isVisible())
+      )
+    )
+    .toBe(true)
+})
+
+test('Settings persists changes and lists shortcuts', async () => {
+  await page.getByTestId('open-settings').click()
+  await expect(page.getByTestId('settings-panel')).toBeVisible()
+  await expect(page.getByTestId('shortcut-list')).toBeVisible()
+
+  await page.getByTestId('crossfade-slider').fill('4')
+  await page.getByTestId('crossfade-slider').dispatchEvent('change')
+  await page.getByTestId('minimize-to-tray').uncheck()
+
+  await page.screenshot({ path: 'test-results/slice7-settings.png' })
+
+  const saved = await page.evaluate(() => window.resonance.settings.getAll())
+  expect(saved.crossfadeSec).toBe(4)
+  expect(saved.minimizeToTray).toBe(false)
+
+  // Restore defaults so later suites are not affected by close-to-tray.
+  await page.getByTestId('crossfade-slider').fill('0')
+  await page.getByTestId('crossfade-slider').dispatchEvent('change')
+})

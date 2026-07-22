@@ -2,11 +2,15 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { AppInfo, DbInfo, Settings } from '@shared/types'
-import { createMainWindow, getMainWindow } from './windows/main'
+import { createMainWindow, getMainWindow, markQuitting } from './windows/main'
 import { getAllSettings, getSetting, setSetting } from './settings'
 import { closeDb, getDb, getDbInfo } from './db/open'
 import { registerLibraryIpc } from './ipc/library'
 import { registerPlaylistIpc } from './ipc/playlists'
+import { registerDesktopIpc } from './ipc/desktop'
+import { createTray, destroyTray } from './tray'
+import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './shortcuts'
+import { closeMiniPlayer } from './windows/mini'
 import { registerProtocolHandlers, registerSchemes } from './protocol'
 
 // Must run before app.whenReady() — privileged scheme registration is only
@@ -57,16 +61,39 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     registerLibraryIpc()
     registerPlaylistIpc()
+    registerDesktopIpc()
     createMainWindow()
+    createTray()
+
+    // Registration failures are captured, not thrown: media keys are commonly
+    // owned by another app, and that is surfaced in Settings rather than
+    // crashing or silently doing nothing.
+    const shortcuts = registerGlobalShortcuts()
+    const failed = shortcuts.filter((s) => !s.registered)
+    if (failed.length) {
+      console.warn(
+        `[shortcuts] ${failed.length} of ${shortcuts.length} could not be registered ` +
+          `(likely owned by another app): ${failed.map((s) => s.accelerator).join(', ')}`
+      )
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
     })
   })
 
+  // With minimize-to-tray on, closing the last window hides the app rather than
+  // quitting it — the tray icon is what keeps it reachable.
   app.on('window-all-closed', () => {
-    // Slice 7 introduces minimize-to-tray, which will make this conditional.
+    if (getSetting('minimizeToTray')) return
     if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('before-quit', () => {
+    markQuitting()
+    unregisterGlobalShortcuts()
+    closeMiniPlayer()
+    destroyTray()
   })
 
   // Close the DB cleanly so WAL is checkpointed rather than left for recovery.

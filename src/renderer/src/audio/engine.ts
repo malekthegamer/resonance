@@ -297,12 +297,29 @@ export class AudioEngine {
     return this.muted
   }
 
-  private applyOutputGain(): void {
-    const target = this.muted ? 0 : this.volume
-    // Ramp rather than jump: an abrupt gain change is audible as a click.
+  /**
+   * Applies a value to an AudioParam, smoothly while audio is running and
+   * instantly when it is not.
+   *
+   * `setTargetAtTime` only advances with the context clock. On a suspended
+   * context — which is the normal state when nothing is playing — the parameter
+   * never moves, so an EQ or volume change made while idle was silently
+   * discarded and only took effect after playback started.
+   */
+  private applyParam(param: AudioParam, value: number, timeConstant: number): void {
+    if (this.ctx.state !== 'running') {
+      param.cancelScheduledValues(0)
+      param.value = value
+      return
+    }
     const now = this.ctx.currentTime
-    this.master.gain.cancelScheduledValues(now)
-    this.master.gain.setTargetAtTime(target, now, 0.015)
+    param.cancelScheduledValues(now)
+    // Ramp rather than jump: an abrupt gain change is audible as a click.
+    param.setTargetAtTime(value, now, timeConstant)
+  }
+
+  private applyOutputGain(): void {
+    this.applyParam(this.master.gain, this.muted ? 0 : this.volume, 0.015)
   }
 
   private setDeckGain(deck: Deck, value: number, rampSec: number): void {
@@ -367,7 +384,7 @@ export class AudioEngine {
     const filter = this.filters[index]
     if (!filter) return
     const value = clamp(db, -EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB)
-    filter.gain.setTargetAtTime(value, this.ctx.currentTime, 0.01)
+    this.applyParam(filter.gain, value, 0.01)
   }
 
   setBandGains(gains: number[]): void {

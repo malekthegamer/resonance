@@ -43,6 +43,27 @@ export const IPC = {
   TRACK_REVEAL: 'track:reveal',
   TRACK_PLAYED: 'track:played',
 
+  // Media keys / tray commands -> renderer
+  MEDIA_PLAY_PAUSE: 'media:playPause',
+  MEDIA_NEXT: 'media:next',
+  MEDIA_PREVIOUS: 'media:previous',
+  MEDIA_STOP: 'media:stop',
+  MEDIA_VOLUME_UP: 'media:volumeUp',
+  MEDIA_VOLUME_DOWN: 'media:volumeDown',
+
+  // Renderer -> main now-playing broadcast (tray tooltip, mini-player)
+  NOW_PLAYING_CHANGED: 'np:changed',
+  NOW_PLAYING_STATE: 'np:state',
+  NOW_PLAYING_REQUEST: 'np:request',
+
+  // Mini player
+  MINI_TOGGLE: 'mini:toggle',
+  MINI_CLOSE: 'mini:close',
+  MINI_IS_OPEN: 'mini:isOpen',
+
+  // Desktop integration
+  SHORTCUT_STATUS: 'shortcuts:status',
+
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set'
