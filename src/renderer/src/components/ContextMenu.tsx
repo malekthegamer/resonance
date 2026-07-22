@@ -34,24 +34,38 @@ export function ContextMenu({ x, y, items, onClose }: Props): React.JSX.Element 
     setPos({ x: nextX, y: nextY })
   }, [x, y, items])
 
+  /*
+   * Held in a ref so the listeners below can subscribe exactly once.
+   *
+   * `onClose` is an inline arrow in the parent, so its identity changes on every
+   * render. Depending on it meant the listeners were torn down and re-added
+   * constantly, and a keypress arriving mid-render could land while nothing was
+   * subscribed — Escape would silently fail to close the menu. That became
+   * reproducible once right-click also updated the selection and added a render.
+   */
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
+    const close = (): void => onCloseRef.current()
+
     function onDown(e: MouseEvent): void {
-      if (!ref.current?.contains(e.target as Node)) onClose()
+      if (!ref.current?.contains(e.target as Node)) close()
     }
     function onKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') close()
     }
     // `capture` so the menu closes even when the click lands on something that
     // stops propagation.
     window.addEventListener('mousedown', onDown, true)
     window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', onClose)
+    window.addEventListener('resize', close)
     return () => {
       window.removeEventListener('mousedown', onDown, true)
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', onClose)
+      window.removeEventListener('resize', close)
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div

@@ -76,6 +76,11 @@ export function openMiniPlayer(): BrowserWindow {
 
   miniWindow.once('ready-to-show', () => {
     miniWindow?.show()
+    // Re-assert after the window is on screen. Windows can decline a topmost
+    // request from a process that is not in the foreground, and the constructor
+    // flag is evaluated before the window exists visually. This is best-effort,
+    // not a guarantee — the OS has the final say.
+    miniWindow?.setAlwaysOnTop(true)
     // Ask the window that owns audio to re-publish immediately. Without this the
     // mini-player shows "Nothing playing" until the next state change, which for
     // a paused track means indefinitely.

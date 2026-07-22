@@ -1,9 +1,11 @@
-import { useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Track } from '@shared/types'
 import { formatDuration } from '../core/format'
 import type { SortKey } from '../core/sort'
 import { useLibrary } from '../state/library'
+import { useSelection } from '../state/selection'
+import { modifierFor } from '../core/selection'
 import { AlbumArt } from './AlbumArt'
 import styles from './TrackTable.module.css'
 
@@ -40,9 +42,39 @@ export function TrackTable({
   onContextMenu
 }: Props): React.JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null)
+  const selection = useSelection((s) => s.selection)
+  const click = useSelection((s) => s.click)
+  const selectAllVisible = useSelection((s) => s.selectAllVisible)
+  const clearSelection = useSelection((s) => s.clear)
   const sortKey = useLibrary((s) => s.sortKey)
   const sortDir = useLibrary((s) => s.sortDir)
   const toggleSort = useLibrary((s) => s.toggleSort)
+
+  // Ranges and Ctrl+A operate on what is on screen, in its current order.
+  const visibleIds = useMemo(() => tracks.map((t) => t.id), [tracks])
+
+  // Ctrl+A and Escape are table-level, so they live here rather than in the
+  // global shortcut hook where they would fire while typing in a dialog.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      const target = e.target as HTMLElement | null
+      const typing =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      if (typing) return
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        selectAllVisible(visibleIds)
+      } else if (e.key === 'Escape') {
+        clearSelection()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [visibleIds, selectAllVisible, clearSelection])
 
   const virtualizer = useVirtualizer({
     count: tracks.length,
@@ -93,14 +125,21 @@ export function TrackTable({
             return (
               <div
                 key={track.id}
-                className={`${styles.row} ${track.available ? '' : styles.unavailable} ${
-                  currentTrackId === track.id ? styles.current : ''
-                }`}
+                className={[
+                  styles.row,
+                  track.available ? '' : styles.unavailable,
+                  currentTrackId === track.id ? styles.current : '',
+                  selection.ids.has(track.id) ? styles.selected : ''
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 style={{ transform: `translateY(${item.start}px)`, height: item.size }}
                 data-testid="track-row"
                 data-track-id={track.id}
                 role="row"
                 tabIndex={0}
+                aria-selected={selection.ids.has(track.id)}
+                onClick={(e) => click(track.id, modifierFor(e), visibleIds)}
                 onDoubleClick={() => onPlay?.(tracks, item.index)}
                 onContextMenu={(e) => onContextMenu?.(e, track, item.index)}
                 onKeyDown={(e) => {

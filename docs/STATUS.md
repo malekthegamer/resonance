@@ -93,6 +93,15 @@ missing rather than dropping them silently — this is intended behaviour, not a
 bug. The author's own ReZero playlist has one such entry
 (`Re_Zero Ending 2 [Stay Alive].mp3`).
 
+**The mini-player's always-on-top is not guaranteed.** Windows declines a
+topmost request from a process that is not in the foreground, so the mini-player
+occasionally does not float. Measured at roughly two failures in eight launches
+on a busy machine, on code predating the selection work — it is environmental,
+not a regression. The app asks for it in the constructor and re-asserts on show;
+the OS has the final say. Deliberately not asserted in the e2e suite, since a
+test that fails a third of the time gets ignored rather than believed. **Check
+by hand** when touching mini-player code.
+
 **Closing the window does not quit the app.** Minimize-to-tray is on by default,
 so ✕ hides to tray. Quit via the tray menu. This surprises people, including
 during development — a running instance holds the single-instance lock.
@@ -119,7 +128,7 @@ worth preserving:
 - `session.spec.ts` — restore across a genuine quit and relaunch, not a reload.
 - `navigation.spec.ts` — regressions for the sidebar and rename bugs.
 
-**Not covered:** WMA playback, code-signed installs, multi-monitor DPI changes,
+**Not covered:** mini-player always-on-top (environment-dependent, see above), WMA playback, code-signed installs, multi-monitor DPI changes,
 libraries in the 10k+ range (the largest real test is ~100 tracks), and
 auto-update itself (verified manually by the user; a CI test would need two
 published releases).

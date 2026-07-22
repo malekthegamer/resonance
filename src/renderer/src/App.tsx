@@ -29,6 +29,7 @@ import { sortTracks } from './core/sort'
 import { useLibrary } from './state/library'
 import { usePlayer } from './state/player'
 import { usePlaylists } from './state/playlists'
+import { useSelection } from './state/selection'
 import { useEq } from './state/eq'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useDesktopIntegration } from './hooks/useDesktopIntegration'
@@ -70,6 +71,11 @@ export default function App(): React.JSX.Element {
   const currentTrack = usePlayer((s) => s.current)
   const playNextTracks = usePlayer((s) => s.playNext)
   const hydrateEq = useEq((s) => s.hydrate)
+  const selection = useSelection((s) => s.selection)
+  const contextMenuAt = useSelection((s) => s.contextMenuAt)
+  const clearSelection = useSelection((s) => s.clear)
+  const pruneSelection = useSelection((s) => s.prune)
+  const selectedTracksOf = useSelection((s) => s.selectedTracks)
   const addToQueue = usePlayer((s) => s.addToQueue)
   useKeyboardShortcuts()
   useDesktopIntegration()
@@ -97,6 +103,12 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
   }, [theme])
+
+  // A rescan can remove tracks; a selection pointing at them would act on
+  // nothing or, worse, on ids the database has since reused.
+  useEffect(() => {
+    pruneSelection(tracks.map((t) => t.id))
+  }, [tracks, pruneSelection])
 
   // Surface import results, including partial matches — a playlist that imports
   // "successfully" with half its tracks missing must not look like a clean win.
@@ -155,11 +167,14 @@ export default function App(): React.JSX.Element {
     (next: ViewId) => {
       void openPlaylist(null)
       setView(next)
+      // Selection must not survive navigation, or a bulk action would silently
+      // apply to tracks that are no longer on screen.
+      clearSelection()
       // The Now Playing screen replaces the whole content area, so leaving it
       // open would make the sidebar look unresponsive for a third time.
       setPanel((p) => (p === 'now' ? null : p))
     },
-    [openPlaylist, setView]
+    [openPlaylist, setView, clearSelection]
   )
 
   const openPlaylistById = useCallback(
@@ -169,40 +184,74 @@ export default function App(): React.JSX.Element {
       setView('songs')
       setFocus(null)
       void openPlaylist(id)
+      clearSelection()
       setPanel((p) => (p === 'now' ? null : p))
     },
-    [openPlaylist, setFocus, setView]
+    [openPlaylist, setFocus, setView, clearSelection]
   )
 
+  /**
+   * Menu for a right-clicked track.
+   *
+   * Acts on the whole selection when the clicked row is part of it, so "add
+   * these 12 to a playlist" is one action. Labels carry the count, because a
+   * menu that silently affects 12 tracks when you meant one is worse than a
+   * verbose menu.
+   */
   function trackMenuItems(track: Track, index: number, list: Track[]): MenuItem[] {
+    const selected = selectedTracksOf(list)
+    const targets = selected.length > 1 && selection.ids.has(track.id) ? selected : [track]
+    const n = targets.length
+    const suffix = n > 1 ? ` (${n} tracks)` : ''
+    const ids = targets.map((t) => t.id)
+
     return [
-      { label: 'Play', onSelect: () => play(list, index) },
-      { label: 'Play next', onSelect: () => playNextTracks([track]) },
-      { label: 'Add to queue', onSelect: () => addToQueue([track]) },
+      {
+        label: n > 1 ? `Play ${n} tracks` : 'Play',
+        onSelect: () => (n > 1 ? play(targets, 0) : play(list, index))
+      },
+      { label: `Play next${suffix}`, onSelect: () => playNextTracks(targets) },
+      { label: `Add to queue${suffix}`, onSelect: () => addToQueue(targets) },
       { separator: true, label: '' },
       {
-        label: 'Add to playlist',
+        label: `Add to playlist${suffix}`,
         submenu: playlists.map((pl) => ({
           label: pl.name,
-          onSelect: () => void addToPlaylist(pl.id, [track.id])
+          onSelect: () => void addToPlaylist(pl.id, ids)
         }))
       },
       ...(openPlaylistId != null
         ? [
             {
-              label: 'Remove from this playlist',
+              label: `Remove from this playlist${suffix}`,
               danger: true,
-              onSelect: () => void removeFromPlaylist(index)
+              onSelect: () => void removeSelectedFromPlaylist(targets, list)
             } as MenuItem
           ]
         : []),
       { separator: true, label: '' },
       {
         label: 'Show in folder',
+        // Only ever one file — opening 12 Explorer windows would be hostile.
+        disabled: false,
         onSelect: () => void window.resonance.tracks.revealInFolder(track.id)
       },
       { label: 'Properties', onSelect: () => setProperties(track) }
     ]
+  }
+
+  /**
+   * Removes tracks from the open playlist by position, highest first.
+   * Removing by ascending position would shift the later entries out from under
+   * each subsequent removal.
+   */
+  async function removeSelectedFromPlaylist(targets: Track[], list: Track[]): Promise<void> {
+    const positions = targets
+      .map((t) => list.findIndex((x) => x.id === t.id))
+      .filter((i) => i >= 0)
+      .sort((a, b) => b - a)
+    for (const position of positions) await removeFromPlaylist(position)
+    clearSelection()
   }
 
   function playlistMenuItems(id: number, name: string): MenuItem[] {
@@ -364,6 +413,8 @@ export default function App(): React.JSX.Element {
               currentTrackId={currentTrack?.id ?? null}
               onContextMenu={(e, track, index) => {
                 e.preventDefault()
+                // Selects the row unless it is already part of the selection.
+                contextMenuAt(track.id)
                 setMenu({
                   x: e.clientX,
                   y: e.clientY,

@@ -110,6 +110,24 @@
   opacity: 0.45;
 }
 
+/*
+ * Selection and now-playing are independent states a row can hold at the same
+ * time, so they must read differently. Selection is a neutral fill with an
+ * accent edge; now-playing keeps the identity gradient on the title.
+ */
+.selected {
+  background: var(--glass-bg-strong);
+  box-shadow: inset 2px 0 0 var(--accent-a);
+}
+
+.selected:hover {
+  background: var(--glass-bg-strong);
+}
+
+.selected.current {
+  background: var(--row-active);
+}
+
 /* Active-track highlight uses the fixed identity accent (plan §A4). */
 .current {
   background: var(--row-active);
