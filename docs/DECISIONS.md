@@ -58,6 +58,50 @@ for the derived fields the original change touched indirectly.
 
 ---
 
+## Tags are written into the files, with a one-time backup
+
+The honest answer to an untagged library is to let the user set real metadata,
+not to guess it — see the revert above. So the tag editor writes genuine
+ID3/Vorbis/MP4 tags that other players can read, rather than keeping Resonance's
+own opinion in its database.
+
+**`node-taglib-sharp` writes; `music-metadata` still reads.** music-metadata has
+no write API. taglib was picked over the alternatives because its dependencies
+are pure JavaScript, so the zero-native-modules guarantee that makes packaging
+reliable here survives. Before a line of the module was written, a probe checked
+the premise that actually mattered — that the two libraries agree — by writing
+with taglib and reading back with music-metadata across all six formats,
+non-ASCII included. They do.
+
+**Backups happen once per file, ever — not once per edit.** The thing worth
+preserving is the state the user arrived with. Re-copying on every save would
+overwrite that pristine original with an already-edited one after a single
+further edit, quietly destroying the only thing the mechanism exists to protect.
+The directory is created with a non-recursive `mkdir`, whose EEXIST makes the
+"have I backed this up already?" check an atomic test-and-set rather than a
+racy `existsSync`.
+
+**The database is updated by rescanning the written files, not by patching
+rows.** Writing tags changes the file's mtime, which is exactly what lets the
+scanner's mtime-skip pass them through — so the tracks table, the FTS index and
+the art cache all update through the one path already known to work. No second
+write path to keep in sync.
+
+**Two risks the plan flagged turned out differently than expected.** Writing to
+a file Chromium is streaming was predicted to fail with EBUSY; measured, it
+succeeds — including a seek into the middle of a 112 MB file with a byte-range
+request in flight. The mitigation (pausing and unloading the deck) was therefore
+not built. The error path still exists and reports in plain language, because
+"measured to work on this machine" is not the same as "cannot fail".
+
+And a small bonus: **taglib fixes the WAV limitation** documented in STATUS.md.
+ffmpeg writes WAV tags as RIFF INFO, which predates Unicode and mangles
+non-ASCII. taglib writes an ID3v2.4 chunk into the WAV alongside it, and
+music-metadata prefers that — so a WAV *retagged through Resonance* round-trips
+Japanese correctly even though the same file as generated does not.
+
+---
+
 ## Frameless window, Snap Layouts forfeited
 
 Chosen for edge-to-edge glass. The Snap Layouts hover flyout attaches to the

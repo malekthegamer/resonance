@@ -1,10 +1,11 @@
 # Status
 
-Version **0.1.4** · 204 unit tests, 98 e2e tests, all passing · shipped and in
+Version **0.1.4** · 233 unit tests, 107 e2e tests, all passing · shipped and in
 daily use.
 
-Unreleased on `master`: track selection (slice 1) and drag-to-playlist (slice 2).
-Tag editing is next; see the slice plan in the working notes.
+Unreleased on `master`: track selection (slice 1), drag-to-playlist (slice 2),
+and the tag write core (slice 3 — real IPC, no UI yet). The tag editor dialog is
+next.
 
 Everything in the original spec is built except smart playlists, which were cut
 deliberately. What follows is what is *not* done, what is known-broken, and what
@@ -45,11 +46,23 @@ Enter/Space, which already mean "play" on a track row, and there is no sensible
 keyboard path from the table to a sidebar drop target. The context menu does
 everything dragging does, so this is an ergonomics gap rather than a dead end.
 
+### Tag editing has no UI yet
+The write core is built, wired to IPC and tested — reading, per-field writes,
+multi-track edits, cover art, one-time backups, and a rescan that folds changes
+back into the database and FTS. There is no dialog, so nothing in the app calls
+it yet. That is slice 4.
+
 ### Untagged libraries have three empty views
 Albums, Artists and Genres are one "Unknown" bucket when files carry no tags.
 **This is intentional** — filename inference was built and reverted at the
-user's request; see [DECISIONS.md](DECISIONS.md). A tag *editor* would be the
-honest fix: let the user set real metadata rather than have the app guess.
+user's request; see [DECISIONS.md](DECISIONS.md). The tag editor is the honest
+fix: let the user set real metadata rather than have the app guess.
+
+### Backups are never pruned
+Every file edited for the first time is copied whole into
+`%APPDATA%\Resonance\tag-backups`. One copy per file, not per edit, so it cannot
+grow without bound as you re-edit — but a library-wide retag doubles that
+library's size on disk, and nothing surfaces or clears it yet.
 
 ### No queue persistence UI
 The queue restores across restarts but cannot be saved as a playlist, and there
@@ -64,9 +77,13 @@ tray icon work, different window chrome handling, and the frameless decisions in
 
 ## Known limitations (won't fix / can't fix)
 
-**WAV cannot carry non-ASCII tags.** RIFF INFO predates Unicode, so a CJK artist
-comes back mangled. ID3v2, Vorbis comments and MP4 atoms all round-trip
-correctly. A passing test documents this so it isn't rediscovered as a bug.
+**WAV cannot carry non-ASCII tags — unless Resonance wrote them.** RIFF INFO
+predates Unicode, so a CJK artist written by ffmpeg comes back mangled
+(`Test Artist 紅蓮` reads as `Test Artist g4h.`). ID3v2, Vorbis
+comments and MP4 atoms all round-trip correctly. A passing test documents this
+so it isn't rediscovered as a bug. The tag editor sidesteps it: taglib writes an
+**ID3v2.4 chunk into the WAV**, which music-metadata prefers, so a WAV retagged
+through Resonance does round-trip Japanese.
 
 **Snap Layouts hover flyout is unavailable.** That flyout attaches to the
 *native* maximize button, which a frameless window does not have. Win+Arrow,
@@ -109,12 +126,13 @@ during development — a running instance holds the single-instance lock.
 
 ## Test coverage notes
 
-**Unit (204)** — queue state machine (exhaustive across shuffle × repeat ×
+**Unit (233)** — queue state machine (exhaustive across shuffle × repeat ×
 end-of-list), M3U parsing/writing, EQ presets and clamping, sleep timer,
 grouping/sorting, filename→title repair, database schema and migrations,
-generated fixture integrity, selection arithmetic, drag routing.
+generated fixture integrity, selection arithmetic, drag routing, tag
+write/read/backup.
 
-**E2E (98)** — drives the real Electron app across 13 spec files. Highlights
+**E2E (107)** — drives the real Electron app across 14 spec files. Highlights
 worth preserving:
 
 - `playback.spec.ts` — the **FFT silence tripwire**: measures analyser peak over
@@ -126,6 +144,11 @@ worth preserving:
 - `eq-nowplaying.spec.ts` — §A4 identity check with deliberately extreme covers.
 - `session.spec.ts` — restore across a genuine quit and relaunch, not a reload.
 - `navigation.spec.ts` — regressions for the sidebar and rename bugs.
+- `tags.spec.ts` — **destructive**, so it runs against its own copies of the
+  fixtures in `test-results/tag-media` and its own userData directory. Writing
+  to the shared fixtures would rewrite the very tags `scan.spec.ts` asserts on,
+  and the failure would surface over there instead of here. Includes a write to
+  a 112 MB file mid-playback, with a byte-range request genuinely in flight.
 - `drag.spec.ts` — drives real pointer drags. Also the **only** coverage of
   queue reordering as a gesture: that existed long before the drag work but was
   only ever exercised through the store, so consolidating the two `DndContext`s

@@ -13,6 +13,8 @@ import type { LibraryStats } from '../main/ipc/library'
 import type { ImportResult } from '../main/ipc/playlists'
 import type { PlaylistSummary } from '../main/db/playlists'
 import type { ShortcutStatus } from '../main/shortcuts'
+import type { TagReadResult, TagValues } from '../main/tags'
+import type { TagWriteReport } from '../main/ipc/tags'
 
 /**
  * The only bridge between main and renderer.
@@ -66,6 +68,18 @@ const api = {
     revealInFolder: (trackId: number): Promise<boolean> =>
       ipcRenderer.invoke(IPC.TRACK_REVEAL, trackId),
     recordPlay: (trackId: number): Promise<void> => ipcRenderer.invoke(IPC.TRACK_PLAYED, trackId)
+  },
+
+  tags: {
+    read: (trackIds: number[]): Promise<TagReadResult[]> =>
+      ipcRenderer.invoke(IPC.TAGS_READ, trackIds),
+    write: (
+      trackIds: number[],
+      changes: TagValues,
+      artworkPath?: string | null
+    ): Promise<TagWriteReport> =>
+      ipcRenderer.invoke(IPC.TAGS_WRITE, trackIds, changes, artworkPath),
+    pickArtwork: (): Promise<string | null> => ipcRenderer.invoke(IPC.TAGS_PICK_ARTWORK)
   },
 
   /**

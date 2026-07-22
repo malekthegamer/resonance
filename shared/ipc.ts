@@ -43,6 +43,11 @@ export const IPC = {
   TRACK_REVEAL: 'track:reveal',
   TRACK_PLAYED: 'track:played',
 
+  // Tag editing. Takes track ids, never paths — see src/main/ipc/tags.ts.
+  TAGS_READ: 'tags:read',
+  TAGS_WRITE: 'tags:write',
+  TAGS_PICK_ARTWORK: 'tags:pickArtwork',
+
   // Media keys / tray commands -> renderer
   MEDIA_PLAY_PAUSE: 'media:playPause',
   MEDIA_NEXT: 'media:next',

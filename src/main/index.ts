@@ -7,6 +7,7 @@ import { getAllSettings, getSetting, setSetting } from './settings'
 import { closeDb, getDb, getDbInfo } from './db/open'
 import { registerLibraryIpc } from './ipc/library'
 import { registerPlaylistIpc } from './ipc/playlists'
+import { registerTagIpc } from './ipc/tags'
 import { registerDesktopIpc } from './ipc/desktop'
 import { setupUpdater } from './updater'
 import { createTray, destroyTray } from './tray'
@@ -64,6 +65,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     registerLibraryIpc()
     registerPlaylistIpc()
+    registerTagIpc()
     registerDesktopIpc()
     setupUpdater()
     createMainWindow()

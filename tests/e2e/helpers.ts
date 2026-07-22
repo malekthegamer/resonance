@@ -18,12 +18,20 @@ import { _electron as electron, type ElectronApplication, type Page } from '@pla
  */
 export const TEST_USER_DATA = resolve(process.cwd(), 'test-results', 'userdata')
 
-export async function launchApp(): Promise<{ app: ElectronApplication; page: Page }> {
+/**
+ * `userDataDir` isolates a spec that would otherwise pollute the shared library.
+ * The tag suite needs it: it rewrites tags on its own copies of the fixtures,
+ * and those tracks landing in the common database would break the scan suite,
+ * which asserts on the generated tag values.
+ */
+export async function launchApp(
+  userDataDir: string = TEST_USER_DATA
+): Promise<{ app: ElectronApplication; page: Page }> {
   const env = { ...process.env }
   delete env['ELECTRON_RUN_AS_NODE']
 
   const app = await electron.launch({
-    args: [resolve(process.cwd(), 'out/main/index.js'), `--user-data-dir=${TEST_USER_DATA}`],
+    args: [resolve(process.cwd(), 'out/main/index.js'), `--user-data-dir=${userDataDir}`],
     env: env as Record<string, string>
   })
 
