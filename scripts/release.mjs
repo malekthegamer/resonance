@@ -15,7 +15,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const kind = process.argv[2] ?? 'patch'
@@ -26,12 +26,35 @@ if (!['patch', 'minor', 'major'].includes(kind)) {
 
 const root = resolve(import.meta.dirname, '..')
 
-// On Windows npm is a .cmd shim, and execFileSync without a shell cannot
-// resolve it — it fails with ENOENT on a plain "npm".
-const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-
 const run = (cmd, args) =>
   execFileSync(cmd, args, { cwd: root, encoding: 'utf8', stdio: 'pipe' }).trim()
+
+/**
+ * Bumps a semver string.
+ *
+ * Done here rather than by shelling out to `npm version`, because npm on Windows
+ * is a .cmd shim and Node refuses to spawn .bat/.cmd without a shell (a CVE
+ * fix), while running it *through* a shell would need fragile quoting for the
+ * commit message. This is deterministic and has no such hazards.
+ */
+function bump(version, kind) {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
+  if (!m) throw new Error(`package.json version "${version}" is not semver`)
+  let [major, minor, patch] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  if (kind === 'major') { major++; minor = 0; patch = 0 }
+  else if (kind === 'minor') { minor++; patch = 0 }
+  else patch++
+  return `${major}.${minor}.${patch}`
+}
+
+/** Keeps package-lock in step, or `npm ci` on the runner fails. */
+function writeVersion(file, version, alsoRootPackage) {
+  const json = JSON.parse(readFileSync(file, 'utf8'))
+  json.version = version
+  if (alsoRootPackage && json.packages?.['']) json.packages[''].version = version
+  writeFileSync(file, JSON.stringify(json, null, 2) + '
+')
+}
 
 // --- preflight --------------------------------------------------------------
 const dirty = run('git', ['status', '--porcelain'])
@@ -58,8 +81,16 @@ if (pkg.repository?.url?.includes('YOUR_GITHUB_USERNAME')) {
 console.log(`Current version: ${pkg.version}`)
 
 // --- bump, tag, push --------------------------------------------------------
-// `npm version` creates the commit and the vX.Y.Z tag in one step.
-const tag = run(NPM, ['version', kind, '-m', 'Release %s'])
+const next = bump(pkg.version, kind)
+const tag = `v${next}`
+
+writeVersion(resolve(root, 'package.json'), next, false)
+writeVersion(resolve(root, 'package-lock.json'), next, true)
+
+run('git', ['add', 'package.json', 'package-lock.json'])
+run('git', ['commit', '-m', `Release ${tag}`])
+run('git', ['tag', '-a', tag, '-m', `Release ${tag}`])
+
 console.log(`New version:     ${tag}`)
 
 const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
