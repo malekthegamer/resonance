@@ -1,6 +1,7 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
+import { ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
 
 /**
  * Slice 9: the packaged build.
@@ -11,9 +12,22 @@ import { _electron as electron, expect, test } from '@playwright/test'
  * This drives the actual packaged binary.
  */
 
+/*
+ * Artifact names are derived from package.json, not hardcoded.
+ *
+ * They were pinned to 0.1.0 while the app was at 0.1.4, and `release/` still
+ * held that old build — so these tests kept passing against a binary from
+ * several versions earlier and reported the packaged build as verified. A stale
+ * `release/` directory must fail loudly, which is what the version assertion at
+ * the end of the launch test is for.
+ */
+const VERSION = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')
+).version as string
+
 const UNPACKED = resolve(process.cwd(), 'release', 'win-unpacked', 'Resonance.exe')
-const INSTALLER = resolve(process.cwd(), 'release', 'Resonance-0.1.0-x64.exe')
-const PORTABLE = resolve(process.cwd(), 'release', 'Resonance-0.1.0-portable.exe')
+const INSTALLER = resolve(process.cwd(), 'release', `Resonance-${VERSION}-x64.exe`)
+const PORTABLE = resolve(process.cwd(), 'release', `Resonance-${VERSION}-portable.exe`)
 
 test.describe('packaged build', () => {
   test.skip(!existsSync(UNPACKED), 'run `npm run dist` first')
@@ -65,6 +79,41 @@ test.describe('packaged build', () => {
         `sqlite ${info.sqlite} · schema v${info.schemaVersion} · ${info.journalMode}\n`
     )
     expect(versions.name).toBe('Resonance')
+    // The binary under test must be the one built from this source tree.
+    expect(versions.version, 'release/ holds a stale build — rerun `npm run dist`').toBe(VERSION)
+
+    /*
+     * The tag editor's writer is an *externalized* dependency: electron-vite
+     * leaves `require('node-taglib-sharp')` in the bundle, so it has to be
+     * resolvable from inside the asar at runtime. Nothing in the unpackaged
+     * suite can catch it being left out — it resolves fine from node_modules in
+     * development and only fails once shipped.
+     */
+    ensureFixtures()
+    await page.evaluate((dir) => window.resonance.library.scanPaths([dir]), FIXTURE_DIR)
+
+    const tagRead = await page.evaluate(async () => {
+      const tracks = await window.resonance.library.getTracks()
+      // Specifically a tagged fixture: `tone-440-6db.wav` is deliberately bare
+      // for the FFT tripwire, so reading it proves nothing about tag decoding.
+      const target = tracks.find((t) => t.path.endsWith('fixture.mp3'))
+      if (!target) return { scanned: tracks.length, found: false }
+      const read = await window.resonance.tags.read([target.id])
+      return {
+        scanned: tracks.length,
+        found: true,
+        ok: read[0]?.ok === true,
+        error: read[0]?.error,
+        title: read[0]?.tags?.title,
+        artist: read[0]?.tags?.artist
+      }
+    })
+    expect(tagRead.scanned, 'the packaged app should have scanned the fixtures').toBeGreaterThan(0)
+    expect(tagRead.found, 'fixture.mp3 should be in the packaged library').toBe(true)
+    expect(tagRead.ok, `taglib failed inside the package: ${tagRead.error ?? ''}`).toBe(true)
+    expect(tagRead.title).toBe('Resonance Test Tone')
+    // Non-ASCII through taglib, decoded inside the asar.
+    expect(tagRead.artist).toBe('Test Artist 紅蓮')
 
     await page.screenshot({ path: 'test-results/slice9-packaged.png' })
     await app.close()
