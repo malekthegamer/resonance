@@ -119,15 +119,6 @@ the OS has the final say. Deliberately not asserted in the e2e suite, since a
 test that fails a third of the time gets ignored rather than believed. **Check
 by hand** when touching mini-player code.
 
-**`desktop.spec.ts` "Settings persists changes" failed once under CI
-conditions.** Seen a single time in a full-suite run; then 112/112 twice more,
-and 5/5 running that spec alone. Not reproduced, so not diagnosed and **not
-fixed** — recorded here rather than forgotten. The suspicion is environmental,
-the same shape as the mini-player entry below: that run's log shows all six
-global shortcuts failing to register, which happens when another Electron
-process still holds them. If it recurs, capture `test-results/` before rerunning
-— a passing rerun deletes the evidence, which is what happened the first time.
-
 **Closing the window does not quit the app.** Minimize-to-tray is on by default,
 so ✕ hides to tray. Quit via the tray menu. This surprises people, including
 during development — a running instance holds the single-instance lock.
@@ -154,6 +145,12 @@ worth preserving:
 - `eq-nowplaying.spec.ts` — §A4 identity check with deliberately extreme covers.
 - `session.spec.ts` — restore across a genuine quit and relaunch, not a reload.
 - `navigation.spec.ts` — regressions for the sidebar and rename bugs.
+- `desktop.spec.ts` "Settings persists" toggles the minimize-to-tray checkbox
+  with `click({ force: true })`, not `uncheck()`. The checkbox is stable in
+  isolation (measured: one rect, zero mutations over 2s), but a full-suite run
+  occasionally jittered its launch — a neighbouring spec's Electron instance can
+  disrupt global-shortcut registration and, with it, sub-frame stability. `force`
+  fires the real click and real onChange without waiting on that stability.
 - `tags.spec.ts` — **destructive**, so it runs against its own copies of the
   fixtures in `test-results/tag-media` and its own userData directory. Writing
   to the shared fixtures would rewrite the very tags `scan.spec.ts` asserts on,

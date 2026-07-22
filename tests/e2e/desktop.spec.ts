@@ -221,17 +221,36 @@ test('Settings persists changes and lists shortcuts', async () => {
 
   await page.getByTestId('crossfade-slider').fill('4')
   await page.getByTestId('crossfade-slider').dispatchEvent('change')
-  await page.getByTestId('minimize-to-tray').uncheck()
+
+  /*
+   * `uncheck()` without force waits for the element to be "stable" — the same
+   * bounding box for two animation frames. Measured in isolation the checkbox is
+   * rock solid (one rect, zero mutations over two seconds), but in a full-suite
+   * run this occasionally timed out: another Electron instance from a
+   * neighbouring spec can jitter a launch (the failing run's log shows all six
+   * global shortcuts failing to register, the orphaned-process signal from
+   * CLAUDE.md). `force` fires a real click and a real onChange — the very thing
+   * being tested — without gating on that sub-frame stability. The slider above
+   * bypasses it the same way, for the same reason.
+   */
+  await page.getByTestId('minimize-to-tray').click({ force: true })
 
   await page.screenshot({ path: 'test-results/slice7-settings.png' })
 
+  await expect
+    .poll(() => page.evaluate(() => window.resonance.settings.getAll().then((s) => s.minimizeToTray)))
+    .toBe(false)
   const saved = await page.evaluate(() => window.resonance.settings.getAll())
   expect(saved.crossfadeSec).toBe(4)
-  expect(saved.minimizeToTray).toBe(false)
 
   // Restore defaults so later suites are not affected by close-to-tray.
   await page.getByTestId('crossfade-slider').fill('0')
   await page.getByTestId('crossfade-slider').dispatchEvent('change')
+  // Leave minimize-to-tray as the app default (on), so this test is repeatable
+  // and does not change close behaviour for whatever runs next.
+  if (!(await page.evaluate(() => window.resonance.settings.getAll().then((s) => s.minimizeToTray)))) {
+    await page.getByTestId('minimize-to-tray').click({ force: true })
+  }
 })
 
 test('the updater reports a clear state and never crashes the app', async () => {
