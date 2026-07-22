@@ -77,8 +77,22 @@ test('a full session survives quit and relaunch', async () => {
   expect(saved.volume).toBeCloseTo(0.42, 2)
 
   // Resize so window state has something distinctive to restore.
-  await first.app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]!.setBounds({ x: 140, y: 90, width: 1100, height: 740 })
+  //
+  // The size is derived from the actual display rather than hardcoded: a fixed
+  // 1100x740 does not fit a 1024x768 CI runner, and Windows silently clamps an
+  // oversized window when it is recreated — so the restore appeared to fail when
+  // really the test had asked for something impossible.
+  await first.app.evaluate(({ BrowserWindow, screen }) => {
+    const wa = screen.getPrimaryDisplay().workArea
+    // Stay above the window's own minimum size (940x600) and inside the display.
+    const width = Math.max(940, Math.min(1100, wa.width - 80))
+    const height = Math.max(600, Math.min(740, wa.height - 80))
+    BrowserWindow.getAllWindows()[0]!.setBounds({
+      x: wa.x + 30,
+      y: wa.y + 30,
+      width,
+      height
+    })
   })
   await first.page.waitForTimeout(700)
 
