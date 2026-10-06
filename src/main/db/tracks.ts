@@ -159,7 +159,7 @@ export function upsertTracks(db: Db, tracks: UpsertInput[], now = Date.now()): U
 
 export function getKnownMtimes(db: Db): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const r of db.all<{ path: string; mtime: number }>('SELECT path, mtime FROM tracks')) {
+  for (const r of db.all<{ path: string; mtime: number }>('SELECT path, mtime FROM tracks WHERE available = 1')) {
     out[r.path] = r.mtime
   }
   return out

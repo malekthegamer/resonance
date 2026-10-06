@@ -29,6 +29,11 @@ const api = {
   getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.APP_INFO),
 
   library: {
+    onChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC.LIB_CHANGED, listener)
+      return () => { ipcRenderer.removeListener(IPC.LIB_CHANGED, listener) }
+    },
     dbInfo: (): Promise<DbInfo> => ipcRenderer.invoke(IPC.DB_INFO),
     pickAndScan: (): Promise<ScanProgress | null> => ipcRenderer.invoke(IPC.LIB_PICK_AND_SCAN),
     scanPaths: (paths: string[]): Promise<ScanProgress> =>

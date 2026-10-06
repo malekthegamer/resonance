@@ -1,11 +1,19 @@
 # Status
 
-Version **0.2.0** · 271 unit tests, 113 e2e tests, all passing · shipped and in
-daily use.
+Version **0.3.0** adds reliability fixes and playlist row reordering, prepared
+for publication through the tested release pipeline. The previous release is 0.2.0.
 
 0.2.0 added track selection, drag-to-playlist, and the tag editor (write core
 plus dialog). Released via the tagged Actions pipeline; auto-update offered from
 0.1.4.
+
+Local verification on **2026-10-06**: type checking and production build pass;
+297 unit checks pass (one optional large-fixture unit check skipped); 133 ordinary
+desktop checks pass (one optional personal-library import skipped); both required
+packaged-app checks pass against freshly built installer/portable artifacts.
+The full desktop run covered 132 passing checks; the final global-search boundary
+check passed separately after its addition. Tests used generated/disposable music,
+isolated user data and disabled updates. These checks preceded release preparation.
 
 Everything in the original spec is built except smart playlists, which were cut
 deliberately. What follows is what is *not* done, what is known-broken, and what
@@ -30,6 +38,15 @@ folder watching, play counts, properties dialog, packaging, and **auto-update
 Measured evidence lives in the commit messages — FFT tripwire readings,
 range-seek timings, per-format scan counts.
 
+The 0.3.0 changes verify safe retryable original backups; FIFO scan/watcher/
+tag jobs with cancellation and live metadata refresh; automatic pre-end overlap
+with both generated tones measured in the mix; paused queue replacements and
+persistent silence after final removal; and playlist pointer reordering that
+moves only the grabbed occurrence, including duplicates under multi-selection.
+Edge scrolling, persistence failure recovery and navigation during saving are
+covered. Sidebar/queue selection drops retain their previous behavior, and
+reordering a playlist leaves its already playing queue unchanged.
+
 ---
 
 ## Gaps
@@ -44,8 +61,9 @@ entry.
 ### Library rows cannot be dragged by keyboard
 Drag-to-playlist is pointer-only. dnd-kit's keyboard sensor activates on
 Enter/Space, which already mean "play" on a track row, and there is no sensible
-keyboard path from the table to a sidebar drop target. The context menu does
-everything dragging does, so this is an ergonomics gap rather than a dead end.
+keyboard path from the table to a sidebar drop target. Context menus cover
+external playlist/queue additions; moving a playlist occurrence remains
+pointer-only.
 
 ### Untagged libraries still start as three empty views
 Albums, Artists and Genres are one "Unknown" bucket until files carry tags.
@@ -128,13 +146,15 @@ during development — a running instance holds the single-instance lock.
 
 ## Test coverage notes
 
-**Unit (271)** — queue state machine (exhaustive across shuffle × repeat ×
+**Unit (297 passing, 1 optional large-fixture check skipped)** — queue state machine (exhaustive across shuffle × repeat ×
 end-of-list), M3U parsing/writing, EQ presets and clamping, sleep timer,
 grouping/sorting, filename→title repair, database schema and migrations,
 generated fixture integrity, selection arithmetic, drag routing, tag
-write/read/backup, tag-form merging, filename parsing.
+write/read/backup, tag-form merging, filename parsing, failed-copy safety, FIFO
+scan cancellation/error handling, watcher buffering, same-mtime restoration,
+duplicate-occurrence edits, search cancellation and playlist persistence races.
 
-**E2E (113)** — drives the real Electron app across 14 spec files. Highlights
+**E2E** — drives the real Electron app across 16 spec files. Highlights
 worth preserving:
 
 - `playback.spec.ts` — the **FFT silence tripwire**: measures analyser peak over
@@ -161,6 +181,19 @@ worth preserving:
   queue reordering as a gesture: that existed long before the drag work but was
   only ever exercised through the store, so consolidating the two `DndContext`s
   into one had no regression net where it could actually break.
+- `playlist-reorder.spec.ts` — real upward/downward pointer drags, edge scrolling,
+  duplicate occurrences under multi-selection, external selection drops,
+  cancellation, saving errors, navigation races and actual quit/relaunch order.
+  Insertion feedback is visually checked in both themes. Global search remains
+  a library view even while a playlist is open.
+- `reliability.spec.ts` — scan cancellation and waiting rescans, immediate folder
+  watching, deletion and same-mtime restoration, live tag/search/playlist/player
+  metadata, automatic overlap with distinct 440/880 Hz FFT signals, shuffle,
+  repeat, sleep, failed/delayed incoming playback, short songs, transport actions
+  during fades and silent final-item removal across a real quit/relaunch.
+- `packaged.spec.ts` — mandatory after installers are built in release CI.
+  Missing artifacts or wrong product/app versions fail; updates are disabled,
+  user data is isolated and failure diagnostics are retained before publishing.
 
 **Not covered:** mini-player always-on-top (environment-dependent, see above), WMA playback, code-signed installs, multi-monitor DPI changes,
 libraries in the 10k+ range (the largest real test is ~100 tracks), and

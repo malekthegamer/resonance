@@ -1,9 +1,12 @@
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
+import { existsSync } from 'node:fs'
 import { app } from 'electron'
 import { EMPTY_SCAN_PROGRESS, type ScanProgress } from '@shared/types'
 import { getDb } from '../db/open'
-import { getKnownMtimes, upsertTracks } from '../db/tracks'
+import { getKnownMtimes, upsertTracks, markUnavailable } from '../db/tracks'
+import { libraryChanged } from '../libraryEvents'
+import { SerialQueue } from './queue'
 import type { ParsedTrack, ScanWorkerData, WorkerMessage } from './worker'
 
 /**
@@ -18,14 +21,14 @@ import type { ParsedTrack, ScanWorkerData, WorkerMessage } from './worker'
 const BATCH_SIZE = 50
 const PROGRESS_THROTTLE_MS = 120
 
-let active: Worker | null = null
+const queue = new SerialQueue<ScanProgress>()
 
 export function artCacheDir(): string {
   return join(app.getPath('userData'), 'artcache')
 }
 
 export function isScanning(): boolean {
-  return active !== null
+  return queue.busy
 }
 
 export interface ScanCallbacks {
@@ -33,14 +36,16 @@ export interface ScanCallbacks {
 }
 
 export function cancelScan(): void {
-  if (active) {
-    void active.terminate()
-    active = null
-  }
+  queue.cancel()
 }
 
+export function shutdownScans(): void { queue.shutdown() }
+
 export function scanFolders(roots: string[], cb: ScanCallbacks): Promise<ScanProgress> {
-  if (active) return Promise.reject(new Error('A scan is already running'))
+  return queue.enqueue((signal) => runScan([...new Set(roots)], cb, signal))
+}
+
+function runScan(roots: string[], cb: ScanCallbacks, signal: AbortSignal): Promise<ScanProgress> {
 
   const db = getDb()
   const started = Date.now()
@@ -50,6 +55,14 @@ export function scanFolders(roots: string[], cb: ScanCallbacks): Promise<ScanPro
     phase: 'walking',
     byFormat: {}
   }
+  if (signal.aborted) {
+    progress.phase = 'cancelled'
+    cb.onProgress(progress)
+    return Promise.resolve(progress)
+  }
+  // A watcher job may have waited behind a long scan while its file vanished.
+  const removed = markUnavailable(db, roots.filter((path) => !existsSync(path)))
+  if (removed) libraryChanged()
 
   let lastEmit = 0
   const emit = (force = false): void => {
@@ -70,71 +83,74 @@ export function scanFolders(roots: string[], cb: ScanCallbacks): Promise<ScanPro
   return new Promise<ScanProgress>((resolve, reject) => {
     // electron-vite emits the worker as its own entry beside the main bundle.
     const worker = new Worker(join(__dirname, 'scan-worker.js'), { workerData })
-    active = worker
+    let settled = false
 
-    const finish = (phase: ScanProgress['phase']): void => {
+    const finish = (phase: ScanProgress['phase'], error?: unknown): void => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', onAbort)
       progress.phase = phase
       progress.elapsedMs = Date.now() - started
-      active = null
       emit(true)
-      resolve({ ...progress, byFormat: { ...progress.byFormat } })
+      // Wait for termination before the next queued job can own the database.
+      void worker.terminate().then(() => {
+        if (error) reject(error)
+        else resolve({ ...progress, byFormat: { ...progress.byFormat } })
+      }, reject)
     }
+    const onAbort = (): void => finish('cancelled')
+    signal.addEventListener('abort', onAbort, { once: true })
 
     worker.on('message', (msg: WorkerMessage) => {
-      switch (msg.type) {
-        case 'found':
-          progress.filesFound = msg.count
-          progress.phase = 'parsing'
-          emit(true)
-          break
+      if (settled) return
+      try {
+        switch (msg.type) {
+          case 'found':
+            progress.filesFound = msg.count
+            progress.phase = 'parsing'
+            emit(true)
+            break
 
-        case 'progress':
-          progress.filesProcessed = msg.processed
-          progress.currentFile = msg.currentFile
-          if (msg.format) {
-            progress.byFormat[msg.format] = (progress.byFormat[msg.format] ?? 0) + 1
+          case 'progress':
+            progress.filesProcessed = msg.processed
+            progress.currentFile = msg.currentFile
+            if (msg.format) {
+              progress.byFormat[msg.format] = (progress.byFormat[msg.format] ?? 0) + 1
+            }
+            emit()
+            break
+
+          case 'batch': {
+            const result = writeBatch(msg.tracks)
+            progress.inserted += result.inserted
+            progress.updated += result.updated
+            if (result.inserted || result.updated) libraryChanged()
+            emit()
+            break
           }
-          emit()
-          break
 
-        case 'batch': {
-          const result = writeBatch(msg.tracks)
-          progress.inserted += result.inserted
-          progress.updated += result.updated
-          emit()
-          break
+          case 'skipped':
+            progress.skipped += msg.count
+            break
+
+          case 'error':
+            progress.errors++
+            break
+
+          case 'done':
+            progress.filesProcessed = Math.max(progress.filesProcessed, msg.processed)
+            finish('done')
+            break
         }
-
-        case 'skipped':
-          progress.skipped += msg.count
-          break
-
-        case 'error':
-          progress.errors++
-          break
-
-        case 'done':
-          progress.filesProcessed = Math.max(progress.filesProcessed, msg.processed)
-          finish('done')
-          break
-      }
+      } catch (err) { finish('error', err) }
     })
 
     worker.on('error', (err) => {
-      active = null
-      progress.phase = 'error'
-      emit(true)
-      reject(err)
+      finish('error', err)
     })
 
     worker.on('exit', (code) => {
-      // A non-zero exit after 'done' has already resolved is harmless; only an
-      // unexpected exit while still active needs reporting.
-      if (active === worker) {
-        active = null
-        if (code === 0) finish('done')
-        else finish('cancelled')
-      }
+      if (!settled) finish('error', new Error(`Scanner exited before completion (${code})`))
     })
   })
 

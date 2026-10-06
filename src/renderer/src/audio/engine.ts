@@ -71,6 +71,8 @@ export class AudioEngine {
   private generation = 0
 
   private crossfadeSec = 0
+  private overlap: { outgoing: Deck; token: number; timer: number } | null = null
+  private pendingPreload: number | null | undefined
 
   constructor(events: EngineEvents) {
     this.events = events
@@ -146,7 +148,7 @@ export class AudioEngine {
       // Re-check on the next tick: a stale `ended` from a superseded load would
       // otherwise advance the queue a second time.
       queueMicrotask(() => {
-        if (gen !== this.generation) return
+        if (gen !== this.generation || this.active !== id) return
         this.events.onEnded()
       })
     })
@@ -185,11 +187,15 @@ export class AudioEngine {
 
   /** Loads and plays a track on the active deck. */
   async load(trackId: number, autoplay = true, startAtSec = 0): Promise<void> {
+    this.cancelOverlap()
     this.generation++
+    const token = this.generation
     await this.resume()
+    if (token !== this.generation) return
 
     const deck = this.activeDeck
     const idle = this.idleDeck
+    idle.el.pause()
 
     // If the requested track is already buffered on the idle deck (preloaded),
     // swap decks instead of reloading it from scratch.
@@ -198,7 +204,7 @@ export class AudioEngine {
       this.active = idle.id
       this.setDeckGain(idle, 1, 0)
       this.setDeckGain(deck, 0, 0)
-      if (startAtSec > 0) idle.el.currentTime = startAtSec
+      idle.el.currentTime = startAtSec
       if (autoplay) await this.safePlay(idle.el)
       return
     }
@@ -210,7 +216,7 @@ export class AudioEngine {
 
     if (startAtSec > 0) {
       const seek = (): void => {
-        deck.el.currentTime = startAtSec
+        if (token === this.generation) deck.el.currentTime = startAtSec
         deck.el.removeEventListener('loadedmetadata', seek)
       }
       deck.el.addEventListener('loadedmetadata', seek)
@@ -224,21 +230,26 @@ export class AudioEngine {
    * Silent and best-effort: a failed preload must never disturb playback.
    */
   preload(trackId: number | null): void {
+    if (this.overlap) { this.pendingPreload = trackId; return }
     if (trackId == null) return
     const idle = this.idleDeck
     if (idle.trackId === trackId) return
+    idle.el.pause()
+    this.setDeckGain(idle, 0, 0)
     idle.trackId = trackId
     idle.el.src = mediaUrl(trackId)
     idle.el.load()
   }
 
-  private async safePlay(el: HTMLAudioElement): Promise<void> {
+  private async safePlay(el: HTMLAudioElement): Promise<boolean> {
     try {
       await el.play()
+      return true
     } catch (err) {
       // AbortError is normal when a load supersedes a pending play().
-      if (err instanceof DOMException && err.name === 'AbortError') return
+      if (err instanceof DOMException && err.name === 'AbortError') return false
       this.events.onError(err instanceof Error ? err.message : 'Playback failed')
+      return false
     }
   }
 
@@ -248,6 +259,9 @@ export class AudioEngine {
   }
 
   pause(): void {
+    this.generation++
+    this.cancelOverlap()
+    this.idleDeck.el.pause()
     this.activeDeck.el.pause()
   }
 
@@ -258,6 +272,7 @@ export class AudioEngine {
 
   /** Stop: pause and rewind, distinct from pause (spec requires both). */
   stop(): void {
+    this.cancelOverlap()
     this.generation++
     for (const deck of Object.values(this.decks)) {
       deck.el.pause()
@@ -267,6 +282,8 @@ export class AudioEngine {
   }
 
   seek(sec: number): void {
+    this.generation++
+    this.cancelOverlap()
     const el = this.activeDeck.el
     const duration = Number.isFinite(el.duration) ? el.duration : 0
     if (duration <= 0) return
@@ -342,41 +359,64 @@ export class AudioEngine {
     return this.crossfadeSec
   }
 
+  canCrossfadeTo(trackId: number): boolean {
+    return !this.overlap && !this.activeDeck.el.paused && this.idleDeck.trackId === trackId && this.idleDeck.el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
+  }
+
   /**
-   * Crossfades into `trackId` on the idle deck. Falls back to a plain load when
-   * crossfade is disabled or the next track is not ready.
+   * Starts overlap only with a ready deck and successful playback. The player
+   * handles ordinary advancement if an early transition cannot begin.
    */
-  async crossfadeTo(trackId: number): Promise<void> {
+  async crossfadeTo(trackId: number, seconds = this.crossfadeSec): Promise<boolean> {
     if (this.crossfadeSec <= 0) {
       await this.load(trackId, true)
-      return
+      return true
     }
-
-    this.generation++
-    await this.resume()
-
     const outgoing = this.activeDeck
     const incoming = this.idleDeck
-
-    if (incoming.trackId !== trackId) {
-      incoming.trackId = trackId
-      incoming.el.src = mediaUrl(trackId)
-    }
+    if (this.overlap || outgoing.el.paused || incoming.trackId !== trackId || incoming.el.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return false
+    const overlapDuration = (): number => Math.min(seconds, outgoing.el.duration - outgoing.el.currentTime, outgoing.el.duration / 2, incoming.el.duration / 2)
+    if (!Number.isFinite(overlapDuration()) || overlapDuration() <= 0) return false
+    const token = ++this.generation
     incoming.el.currentTime = 0
-
+    this.setDeckGain(incoming, 0, 0)
+    if (!await this.safePlay(incoming.el)) return false
+    if (token !== this.generation) { incoming.el.pause(); return false }
+    // play() may take time even after buffering. Clamp again at the actual
+    // start; an outgoing song that ended meanwhile uses ordinary advancement.
+    const duration = overlapDuration()
+    if (!Number.isFinite(duration) || duration <= 0) { incoming.el.pause(); return false }
     this.active = incoming.id
-    this.setDeckGain(incoming, 1, this.crossfadeSec)
-    this.setDeckGain(outgoing, 0, this.crossfadeSec)
-    await this.safePlay(incoming.el)
+    this.events.onPlayingChanged(true)
+    this.setDeckGain(incoming, 1, duration)
+    this.setDeckGain(outgoing, 0, duration)
+    const timer = window.setTimeout(() => {
+      if (this.overlap?.token !== token) return
+      const next = this.pendingPreload
+      this.cancelOverlap()
+      if (next !== undefined) this.preload(next)
+    }, duration * 1000 + 60)
+    this.overlap = { outgoing, token, timer }
+    return true
+  }
 
-    // Stop the outgoing deck only after its gain has actually reached zero,
-    // otherwise the tail is audibly cut off.
-    window.setTimeout(
-      () => {
-        if (this.active !== outgoing.id) outgoing.el.pause()
-      },
-      this.crossfadeSec * 1000 + 60
-    )
+  /** Release the outgoing deck before any transport action can reuse it. */
+  private cancelOverlap(): void {
+    if (this.overlap) {
+      window.clearTimeout(this.overlap.timer)
+      this.overlap.outgoing.el.pause()
+      this.setDeckGain(this.overlap.outgoing, 0, 0)
+      this.setDeckGain(this.activeDeck, 1, 0)
+      this.overlap = null
+    }
+    this.pendingPreload = undefined
+  }
+
+  /** Cancel a pending start or overlap before a new transport action. */
+  cancelTransition(): void {
+    this.generation++
+    this.cancelOverlap()
+    this.idleDeck.el.pause()
   }
 
   /** EQ band gain in dB, -12..+12. */
@@ -425,6 +465,8 @@ export class AudioEngine {
   }
 
   dispose(): void {
+    this.generation++
+    this.cancelOverlap()
     for (const deck of Object.values(this.decks)) {
       deck.el.pause()
       deck.el.removeAttribute('src')

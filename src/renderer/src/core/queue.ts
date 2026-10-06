@@ -223,13 +223,13 @@ export function playNext(state: QueueState, ids: number[]): QueueState {
 
   const items = [...state.items]
   items.splice(state.index + 1, 0, ...ids)
-  return reindex(state, items, state.items[state.index]!)
+  return reindexToIndex(state, items, state.index, (i) => i > state.index ? i + ids.length : i)
 }
 
 export function addToQueue(state: QueueState, ids: number[]): QueueState {
   if (ids.length === 0) return state
   if (state.items.length === 0) return setQueue(ids, 0, state)
-  return reindex(state, [...state.items, ...ids], state.items[state.index]!)
+  return reindexToIndex(state, [...state.items, ...ids], state.index)
 }
 
 export function removeAt(state: QueueState, itemIndex: number): QueueState {
@@ -246,7 +246,7 @@ export function removeAt(state: QueueState, itemIndex: number): QueueState {
       ? state.index - 1
       : state.index
 
-  return reindexToIndex(state, items, anchorIndex)
+  return reindexToIndex(state, items, anchorIndex, (i) => i === itemIndex ? null : i > itemIndex ? i - 1 : i)
 }
 
 /** Reorders the queue (drag to reorder), keeping the same track playing. */
@@ -255,28 +255,22 @@ export function move(state: QueueState, from: number, to: number): QueueState {
   if (from < 0 || from >= state.items.length) return state
   if (to < 0 || to >= state.items.length) return state
 
-  const currentId = state.items[state.index]
   const items = [...state.items]
   const [moved] = items.splice(from, 1)
   items.splice(to, 0, moved!)
 
-  return reindex(state, items, currentId!)
+  const remap = (i: number): number => i === from ? to : from < to && i > from && i <= to ? i - 1 : from > to && i >= to && i < from ? i + 1 : i
+  return reindexToIndex(state, items, remap(state.index), remap)
 }
 
-/** Rebuilds order after the item list changed, keeping `currentId` playing. */
-function reindex(state: QueueState, items: number[], currentId: number): QueueState {
-  const index = items.indexOf(currentId)
-  return reindexToIndex(state, items, index >= 0 ? index : 0)
-}
-
-function reindexToIndex(state: QueueState, items: number[], index: number): QueueState {
+function reindexToIndex(state: QueueState, items: number[], index: number, remap: (i: number) => number | null = (i) => i): QueueState {
   if (!state.shuffle) {
     return { ...state, items, index, order: items.map((_, i) => i), orderPos: index }
   }
 
   // Preserve the existing shuffle order where possible: dropping or adding one
   // track should not reshuffle everything the user has yet to hear.
-  const kept = state.order.filter((i) => i < items.length)
+  const kept = state.order.map(remap).filter((i): i is number => i !== null && i < items.length)
   const missing = items.map((_, i) => i).filter((i) => !kept.includes(i))
   const order = [...kept, ...missing]
   const orderPos = Math.max(0, order.indexOf(index))

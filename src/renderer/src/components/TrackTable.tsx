@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { useDndContext, useDraggable } from '@dnd-kit/core'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useDndContext, useDraggable, useDroppable } from '@dnd-kit/core'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Track } from '@shared/types'
 import { formatDuration } from '../core/format'
@@ -7,7 +7,7 @@ import type { SortKey } from '../core/sort'
 import { useLibrary } from '../state/library'
 import { useSelection } from '../state/selection'
 import { modifierFor, orderedSelection } from '../core/selection'
-import { dragPayloadFor, readDragData, type LibraryDrag } from '../core/dnd'
+import { dragPayloadFor, readDragData, readDropData, type DragData, type LibraryDrag, type PlaylistEntryDrop } from '../core/dnd'
 import { AlbumArt } from './AlbumArt'
 import styles from './TrackTable.module.css'
 
@@ -35,6 +35,9 @@ interface RowProps {
   onClick(e: React.MouseEvent): void
   onDoubleClick(): void
   onContextMenu(e: React.MouseEvent): void
+  playlistId?: number
+  saving?: boolean
+  insertion?: 'before' | 'after'
 }
 
 /**
@@ -56,28 +59,44 @@ function TrackRow({
   style,
   onClick,
   onDoubleClick,
-  onContextMenu
+  onContextMenu,
+  playlistId,
+  saving,
+  insertion
 }: RowProps): React.JSX.Element {
   const { setNodeRef, listeners } = useDraggable({
-    id: `track-${track.id}`,
-    data: { type: 'library-tracks', originId: track.id, trackIds: dragIds } satisfies LibraryDrag
+    id: playlistId == null ? `track-${track.id}` : `playlist-${playlistId}-${index}`,
+    disabled: saving,
+    data: { type: 'library-tracks', originId: track.id, trackIds: dragIds,
+      ...(playlistId == null ? {} : { playlistOrigin: { playlistId, index } }) } satisfies LibraryDrag
   })
+  const drop = useDroppable({
+    id: `playlist-drop-${playlistId}-${index}`,
+    disabled: playlistId == null || saving,
+    data: { type: 'playlist-entry', playlistId: playlistId ?? -1, index } satisfies PlaylistEntryDrop
+  })
+  const rowRef = useCallback((node: HTMLDivElement | null) => {
+    setNodeRef(node); drop.setNodeRef(node)
+  }, [setNodeRef, drop.setNodeRef])
 
   return (
     <div
-      ref={setNodeRef}
+      ref={rowRef}
       className={[
         styles.row,
         track.available ? '' : styles.unavailable,
         isCurrent ? styles.current : '',
         isSelected ? styles.selected : '',
-        isDragging ? styles.dragging : ''
+        isDragging ? styles.dragging : '',
+        insertion === 'before' ? styles.insertBefore : insertion === 'after' ? styles.insertAfter : ''
       ]
         .filter(Boolean)
         .join(' ')}
       style={style}
       data-testid="track-row"
       data-track-id={track.id}
+      data-playlist-position={playlistId == null ? undefined : index}
+      data-insertion={insertion}
       /*
        * Only the pointer listeners are spread. dnd-kit's `attributes` would
        * overwrite role="row" with role="button" and add aria-pressed, which is
@@ -130,11 +149,14 @@ function TrackRow({
 
 interface Props {
   tracks: Track[]
+  activeDrag?: DragData | null
   /** Hidden when a grid already establishes the album context. */
   showArt?: boolean
   onPlay?(tracks: Track[], index: number): void
   currentTrackId?: number | null
   onContextMenu?(e: React.MouseEvent, track: Track, index: number): void
+  playlistId?: number
+  saving?: boolean
 }
 
 /**
@@ -149,7 +171,10 @@ export function TrackTable({
   showArt = true,
   onPlay,
   currentTrackId,
-  onContextMenu
+  onContextMenu,
+  playlistId,
+  saving,
+  activeDrag
 }: Props): React.JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null)
   const selection = useSelection((s) => s.selection)
@@ -175,7 +200,10 @@ export function TrackTable({
   // `useDraggable`'s own `isDragging` is true for the grabbed row alone, so a
   // three-track drag dimmed one row and left the other two looking untouched —
   // which reads as "only this one is moving".
-  const dragging = readDragData(useDndContext().active?.data.current)
+  const dnd = useDndContext()
+  const dragging = activeDrag ?? readDragData(dnd.active?.data.current)
+  const over = readDropData(dnd.over?.data.current)
+  const internal = dragging?.type === 'library-tracks' && dragging.playlistOrigin?.playlistId === playlistId && over?.type === 'playlist-entry'
   const draggingIds = useMemo(
     () => new Set(dragging?.type === 'library-tracks' ? dragging.trackIds : []),
     [dragging]
@@ -208,7 +236,8 @@ export function TrackTable({
     count: tracks.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 10
+    overscan: 10,
+    getItemKey: (index) => playlistId == null ? tracks[index]!.id : `playlist-${playlistId}-${index}`
   })
 
   if (tracks.length === 0) {
@@ -229,15 +258,16 @@ export function TrackTable({
         {showArt && <span className={styles.colArt} />}
         {COLUMNS.map((col) => (
           <button
+            disabled={playlistId != null}
             key={col.key}
             className={`${styles.headCell} ${col.className} ${
-              sortKey === col.key ? styles.sorted : ''
+              playlistId == null && sortKey === col.key ? styles.sorted : ''
             }`}
             onClick={() => toggleSort(col.key)}
             data-testid={`sort-${col.key}`}
           >
             {col.label}
-            {sortKey === col.key && (
+            {playlistId == null && sortKey === col.key && (
               <span className={styles.caret} aria-hidden>
                 {sortDir === 'asc' ? '▲' : '▼'}
               </span>
@@ -252,14 +282,17 @@ export function TrackTable({
             const track = tracks[item.index]!
             return (
               <TrackRow
-                key={track.id}
+                key={playlistId == null ? track.id : `playlist-${playlistId}-${item.index}`}
                 track={track}
                 index={item.index}
                 isCurrent={currentTrackId === track.id}
                 isSelected={selection.ids.has(track.id)}
-                isDragging={draggingIds.has(track.id)}
+                isDragging={internal && dragging?.type === 'library-tracks' ? dragging.playlistOrigin?.index === item.index : draggingIds.has(track.id)}
                 dragIds={dragPayloadFor(track.id, selection.ids, selectedInOrder)}
                 showArt={showArt}
+                playlistId={playlistId}
+                saving={saving}
+                insertion={internal && over?.type === 'playlist-entry' && over.index === item.index && dragging?.type === 'library-tracks' && dragging.playlistOrigin?.index !== over.index ? (dragging.playlistOrigin!.index < over.index ? 'after' : 'before') : undefined}
                 style={{ transform: `translateY(${item.start}px)`, height: item.size }}
                 onClick={(e) => click(track.id, modifierFor(e), visibleIds)}
                 onDoubleClick={() => onPlay?.(tracks, item.index)}

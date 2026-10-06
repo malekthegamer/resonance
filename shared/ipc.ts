@@ -22,6 +22,7 @@ export const IPC = {
   LIB_PICK_AND_SCAN: 'lib:pickAndScan',
   LIB_SCAN_PATHS: 'lib:scanPaths',
   LIB_SCAN_PROGRESS: 'lib:scanProgress',
+  LIB_CHANGED: 'lib:changed',
   LIB_CANCEL_SCAN: 'lib:cancelScan',
   LIB_GET_TRACKS: 'lib:getTracks',
   LIB_SEARCH: 'lib:search',

@@ -151,3 +151,18 @@ describe('dragLabel', () => {
     expect(dragLabel([1, 2, 3], titleOf)).toBe('3 tracks')
   })
 })
+describe('playlist occurrence drops', () => {
+  const active: DragData = { type: 'library-tracks', originId: 7, trackIds: [7, 9], playlistOrigin: { playlistId: 4, index: 2 } }
+  it('moves a single occurrence while external drops retain the selected batch', () => {
+    expect(resolveDrop(active, { type: 'playlist-entry', playlistId: 4, index: 0 })).toEqual({ kind: 'reorder-playlist', playlistId: 4, from: 2, to: 0 })
+    expect(resolveDrop(active, { type: 'playlist', playlistId: 5 })).toEqual({ kind: 'add-to-playlist', playlistId: 5, trackIds: [7, 9] })
+    expect(resolveDrop(active, { type: 'queue' })).toEqual({ kind: 'add-to-queue', trackIds: [7, 9] })
+  })
+  it('rejects self drops, different playlists, and library-only origins', () => {
+    expect(resolveDrop(active, { type: 'playlist-entry', playlistId: 4, index: 2 })).toBeNull()
+    expect(resolveDrop(active, { type: 'playlist-entry', playlistId: 5, index: 0 })).toBeNull()
+    expect(resolveDrop(libraryDrag(7, [7]), { type: 'playlist-entry', playlistId: 4, index: 0 })).toBeNull()
+    expect(readDropData({ type: 'playlist-entry', playlistId: 4, index: NaN })).toBeNull()
+    expect(readDropData({ type: 'playlist-entry', playlistId: 4, index: 0.5 })).toBeNull()
+  })
+})

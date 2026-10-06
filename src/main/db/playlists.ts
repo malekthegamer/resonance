@@ -137,6 +137,7 @@ export function removeFromPlaylist(db: Db, playlistId: number, position: number)
  * shuffle collides with itself partway through.
  */
 export function reorderPlaylist(db: Db, playlistId: number, from: number, to: number): void {
+  if (!Number.isInteger(playlistId) || !Number.isInteger(from) || !Number.isInteger(to)) throw new Error('Invalid playlist position')
   db.transaction(() => {
     const ids = db
       .all<{ track_id: number }>(
@@ -145,7 +146,8 @@ export function reorderPlaylist(db: Db, playlistId: number, from: number, to: nu
       )
       .map((r) => r.track_id)
 
-    if (from < 0 || from >= ids.length || to < 0 || to >= ids.length) return
+    if (from < 0 || from >= ids.length || to < 0 || to >= ids.length) throw new Error('Playlist position no longer exists')
+    if (from === to) return
 
     const [moved] = ids.splice(from, 1)
     ids.splice(to, 0, moved!)

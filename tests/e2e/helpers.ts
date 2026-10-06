@@ -28,6 +28,7 @@ export async function launchApp(
   userDataDir: string = TEST_USER_DATA
 ): Promise<{ app: ElectronApplication; page: Page }> {
   const env = { ...process.env }
+  env['RESONANCE_DISABLE_UPDATER'] = '1'
   delete env['ELECTRON_RUN_AS_NODE']
 
   const app = await electron.launch({

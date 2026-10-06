@@ -9,7 +9,7 @@ daily use by its author.
 which are usually the more useful half.
 
 - **Repo:** https://github.com/malekthegamer/resonance
-- **Current version:** 0.2.0 · **Tests:** 271 unit, 113 e2e, all passing
+- **Current version:** 0.3.0 · **Verified:** 297 unit, 133 desktop and 2 packaged checks (optional skips documented in STATUS.md)
 - **Users:** the author and friends, on Windows 11. Not a hypothetical audience —
   a regression means someone's music player breaks.
 

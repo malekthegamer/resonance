@@ -20,15 +20,14 @@ export function useSessionAndTimers(): void {
   useEffect(() => {
     const id = window.setInterval(() => {
       const s = usePlayer.getState()
-      // Nothing loaded means nothing worth persisting; writing an empty session
-      // over a good one would lose it.
-      if (s.queue.items.length > 0) s.persistSession()
+      // Save intentional empty queues too, but only after restoration finishes.
+      if (s.sessionRestored) s.persistSession()
     }, SESSION_SAVE_INTERVAL_MS)
 
     // Also save when the window is closing, so the last few seconds are not lost.
     const onHide = (): void => {
       const s = usePlayer.getState()
-      if (s.queue.items.length > 0) s.persistSession()
+      if (s.sessionRestored) s.persistSession()
     }
     window.addEventListener('pagehide', onHide)
     window.addEventListener('beforeunload', onHide)

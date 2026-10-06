@@ -15,6 +15,8 @@ export interface LibraryDrag {
   originId: number
   /** Everything the drag carries: the selection, if the origin is part of it. */
   trackIds: readonly number[]
+  /** Occurrence in the unfiltered open playlist; external drops still carry the selection. */
+  playlistOrigin?: { playlistId: number; index: number }
 }
 
 /** A drag that started on a queue row. Queue positions, not track ids. */
@@ -36,10 +38,12 @@ export interface QueueDrop {
 }
 
 /** Queue rows are droppable as well as draggable — that is how reordering works. */
-export type DropData = PlaylistDrop | QueueDrop | QueueDrag
+export interface PlaylistEntryDrop { type: 'playlist-entry'; playlistId: number; index: number }
+export type DropData = PlaylistDrop | QueueDrop | QueueDrag | PlaylistEntryDrop
 
 export type DropAction =
   | { kind: 'reorder-queue'; from: number; to: number }
+  | { kind: 'reorder-playlist'; playlistId: number; from: number; to: number }
   | { kind: 'add-to-playlist'; playlistId: number; trackIds: readonly number[] }
   | { kind: 'add-to-queue'; trackIds: readonly number[] }
 
@@ -66,7 +70,8 @@ export function readDragData(data: unknown): DragData | null {
     return {
       type: 'library-tracks',
       originId: d['originId'],
-      trackIds: d['trackIds'] as number[]
+      trackIds: d['trackIds'] as number[],
+      ...(validOrigin(d['playlistOrigin']) ? { playlistOrigin: d['playlistOrigin'] } : {})
     }
   }
   return null
@@ -75,6 +80,9 @@ export function readDragData(data: unknown): DragData | null {
 export function readDropData(data: unknown): DropData | null {
   if (!data || typeof data !== 'object') return null
   const d = data as Record<string, unknown>
+  if (d['type'] === 'playlist-entry' && Number.isInteger(d['playlistId']) && Number.isInteger(d['index']) && (d['index'] as number) >= 0) {
+    return { type: 'playlist-entry', playlistId: d['playlistId'] as number, index: d['index'] as number }
+  }
 
   if (d['type'] === 'queue-item' && typeof d['index'] === 'number') {
     return { type: 'queue-item', index: d['index'] }
@@ -84,6 +92,12 @@ export function readDropData(data: unknown): DropData | null {
     return { type: 'playlist', playlistId: d['playlistId'] }
   }
   return null
+}
+
+function validOrigin(value: unknown): value is { playlistId: number; index: number } {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  return Number.isInteger(v['playlistId']) && Number.isInteger(v['index']) && (v['index'] as number) >= 0
 }
 
 /**
@@ -122,6 +136,11 @@ export function resolveDrop(
     if (over.type !== 'queue-item') return null
     if (over.index === active.index) return null
     return { kind: 'reorder-queue', from: active.index, to: over.index }
+  }
+  if (over.type === 'playlist-entry') {
+    const origin = active.playlistOrigin
+    if (!origin || origin.playlistId !== over.playlistId || origin.index === over.index) return null
+    return { kind: 'reorder-playlist', playlistId: origin.playlistId, from: origin.index, to: over.index }
   }
 
   if (active.trackIds.length === 0) return null

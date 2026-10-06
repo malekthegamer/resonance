@@ -36,7 +36,9 @@ jobs:
       # The e2e suite drives a real Electron window, which needs a desktop
       # session; windows-latest runners provide one.
       - name: End-to-end tests
-        run: npm run test:e2e
+        run: |
+          npm run build
+          npx playwright test --grep-invert "packaged build"
         env:
           RESONANCE_DISABLE_UPDATER: '1'
 
@@ -48,6 +50,20 @@ jobs:
       # electron-updater, so nothing could be downloaded or auto-updated.
       - name: Build installers
         run: npx electron-builder --win --publish never
+
+      - name: Verify packaged app before publishing
+        run: npx playwright test tests/e2e/packaged.spec.ts
+        env:
+          RESONANCE_DISABLE_UPDATER: '1'
+          RESONANCE_REQUIRE_PACKAGED: '1'
+
+      - name: Retain test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resonance-test-diagnostics
+          path: test-results/
+          if-no-files-found: ignore
 
       # One explicit, published release with every asset attached. latest.yml is
       # not optional: without it installed copies cannot discover updates.

@@ -27,7 +27,16 @@ interface LibraryState {
 }
 
 let searchToken = 0
+let loadToken = 0
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+let settleSearchDelay: (() => void) | null = null
+
+function cancelSearchDelay(): void {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = null
+  settleSearchDelay?.()
+  settleSearchDelay = null
+}
 /** Long enough to skip intermediate keystrokes, short enough to feel instant. */
 const SEARCH_DEBOUNCE_MS = 120
 
@@ -43,9 +52,14 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   scan: EMPTY_SCAN_PROGRESS,
 
   async load() {
+    const token = ++loadToken
     set({ loading: true })
-    const tracks = await window.resonance.library.getTracks()
-    set({ tracks, loading: false })
+    try {
+      const tracks = await window.resonance.library.getTracks()
+      if (token !== loadToken) return
+      set({ tracks, loading: false })
+      if (get().query.trim()) await get().setQuery(get().query)
+    } finally { if (token === loadToken) set({ loading: false }) }
   },
 
   /**
@@ -59,6 +73,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
    */
   setView(view) {
     searchToken++ // abandon any in-flight search so a late reply cannot restore it
+    cancelSearchDelay()
     set({ view, focus: null, query: '', searchResults: null })
   },
 
@@ -68,7 +83,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
 
   async setQuery(query) {
     set({ query })
-    if (searchTimer) clearTimeout(searchTimer)
+    cancelSearchDelay()
 
     if (!query.trim()) {
       searchToken++
@@ -84,7 +99,12 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     // later one and the list shows results for a prefix the user already edited.
     const token = ++searchToken
     await new Promise<void>((resolve) => {
-      searchTimer = setTimeout(resolve, SEARCH_DEBOUNCE_MS)
+      settleSearchDelay = resolve
+      searchTimer = setTimeout(() => {
+        searchTimer = null
+        settleSearchDelay = null
+        resolve()
+      }, SEARCH_DEBOUNCE_MS)
     })
     if (token !== searchToken) return
 

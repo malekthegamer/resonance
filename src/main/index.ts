@@ -14,7 +14,7 @@ import { createTray, destroyTray } from './tray'
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './shortcuts'
 import { closeMiniPlayer } from './windows/mini'
 import { startWatching, stopWatching } from './scan/watcher'
-import { scanFolders } from './scan/controller'
+import { scanFolders, shutdownScans } from './scan/controller'
 import { registerProtocolHandlers, registerSchemes } from './protocol'
 
 // Must run before app.whenReady() — privileged scheme registration is only
@@ -63,7 +63,7 @@ if (!app.requestSingleInstanceLock()) {
 
     registerProtocolHandlers()
     registerIpc()
-    registerLibraryIpc()
+    registerLibraryIpc(startFolderWatching)
     registerPlaylistIpc()
     registerTagIpc()
     registerDesktopIpc()
@@ -100,6 +100,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     markQuitting()
     stopWatching()
+    shutdownScans()
     unregisterGlobalShortcuts()
     closeMiniPlayer()
     destroyTray()
@@ -117,8 +118,7 @@ if (!app.requestSingleInstanceLock()) {
  * path here would drift.
  */
 export function startFolderWatching(): void {
-  stopWatching()
-  if (!getSetting('watchFolders')) return
+  if (!getSetting('watchFolders')) { stopWatching(); return }
 
   try {
     const folders = getDb()
@@ -137,7 +137,7 @@ export function startFolderWatching(): void {
             }
           })
         } catch {
-          /* a scan already running; the next filesystem event will retry */
+          /* shutdown or worker failure; the scan reports its terminal state */
         }
       }
     })

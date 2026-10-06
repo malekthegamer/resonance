@@ -12,7 +12,7 @@ Electron + React + TypeScript. Frameless glass UI on a fixed blue→purple ident
 
 **Playback** — play/pause/stop/next/previous, draggable seek with buffered indication, volume and mute, shuffle, and repeat (off / all / one). Supports MP3, FLAC, WAV, M4A/AAC, OGG and Opus.
 
-**Queue & playlists** — reorderable Now Playing queue, playlist CRUD with persisted drag order, and M3U/M3U8 import and export.
+**Queue & playlists** — reorderable Now Playing queue, playlist CRUD, and M3U/M3U8 import and export. Drag anywhere on a playlist row to move that song, with insertion feedback, edge scrolling and persisted order. Duplicate songs remain separate occurrences; dragging within a playlist moves only the grabbed song even under multi-selection.
 
 **Equalizer** — ten bands (31 Hz – 16 kHz, ±12 dB) with eleven presets, custom preset save, and a bypass toggle. Changes are audible while you drag.
 
@@ -76,8 +76,8 @@ Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
 ## Testing
 
 ```bash
-npm test          # Vitest — pure logic (154 tests)
-npm run test:e2e  # builds, then drives the real Electron app (77 tests)
+npm test          # Vitest — 298 checks, including one optional large-fixture check
+npm run test:e2e  # builds, then drives the real Electron app (136 checks including packaging)
 ```
 
 Audio fixtures are **generated**, not committed — `tests/fixtures/gen-audio.ts` synthesizes tagged FLAC/M4A/OGG/Opus/WAV/MP3 from a tone via `ffmpeg-static`, plus a ~112 MB file for range-seek testing. First run takes a few seconds; afterwards they are reused.

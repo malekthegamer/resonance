@@ -137,6 +137,21 @@
   opacity: 0.4;
 }
 
+.insertBefore::before,
+.insertAfter::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 3px;
+  background: var(--accent-grad-h);
+  border-radius: 3px;
+  pointer-events: none;
+}
+.insertBefore::before { top: 0; }
+.insertAfter::after { bottom: 0; }
+.headCell:disabled { cursor: default; }
+
 /* Active-track highlight uses the fixed identity accent (plan §A4). */
 .current {
   background: var(--row-active);

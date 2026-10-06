@@ -16,7 +16,6 @@ import {
   jumpTo as qJumpTo,
   move as qMove,
   next as qNext,
-  peekNext,
   playNext as qPlayNext,
   previous as qPrevious,
   removeAt as qRemoveAt,
@@ -68,6 +67,7 @@ interface PlayerState {
   cancelSleep(): void
   restoreSession(): Promise<void>
   persistSession(): void
+  refreshKnown(tracks: Track[]): void
 }
 
 let engine: AudioEngine | null = null
@@ -78,6 +78,61 @@ export function getEngine(): AudioEngine | null {
 }
 
 export const usePlayer = create<PlayerState>((set, get) => {
+  let prepared: { queue: QueueState; result: ReturnType<typeof qNext> } | null = null
+  let transitionEpoch = 0
+  let transitioning = false
+  let fadeAttemptedFor: QueueState | null = null
+  let endedWhileTransitioning = false
+  let restoringSession = false
+
+  function invalidateTransition(): void {
+    transitionEpoch++
+    if (transitioning) engine?.cancelTransition()
+    transitioning = false
+    fadeAttemptedFor = null
+    prepared = null
+    endedWhileTransitioning = false
+  }
+
+  function nextTransition(): ReturnType<typeof qNext> {
+    const queue = get().queue
+    if (prepared?.queue !== queue) prepared = { queue, result: qNext(queue, true) }
+    return prepared.result
+  }
+
+  function preloadNext(): void {
+    const result = nextTransition()
+    engine?.preload(result.playing ? currentTrackId(result.state) : null)
+  }
+
+  async function maybeCrossfade(position: number, duration: number): Promise<void> {
+    const s = get()
+    if (!engine || transitioning || fadeAttemptedFor === s.queue || !engine.playing || s.crossfadeSec <= 0 || s.queue.repeat === 'one' || shouldStopAtTrackEnd(s.sleep)) return
+    const result = nextTransition()
+    const id = currentTrackId(result.state)
+    if (!result.playing || result.restart || id == null) return
+    const overlap = Math.min(s.crossfadeSec, duration / 2, (s.known.get(id)?.duration ?? 0) / 2)
+    if (overlap <= 0 || duration - position > overlap || duration - position <= 0) return
+    if (!engine.canCrossfadeTo(id)) return
+    transitioning = true
+    fadeAttemptedFor = s.queue
+    const token = transitionEpoch
+    let started = false
+    try {
+      started = await engine.crossfadeTo(id, overlap)
+      if (!started || token !== transitionEpoch || get().queue !== s.queue) return
+      set({ queue: result.state, current: syncCurrent(result.state), position: engine.position, duration: engine.duration, buffered: [] })
+      prepared = null
+      preloadNext()
+      get().persistSession()
+    } finally {
+      if (token === transitionEpoch) {
+        transitioning = false
+        if (endedWhileTransitioning && !started) { endedWhileTransitioning = false; void get().next(true) }
+      }
+    }
+  }
+
   function remember(tracks: Track[]): Map<number, Track> {
     const known = new Map(get().known)
     for (const t of tracks) known.set(t.id, t)
@@ -92,23 +147,21 @@ export const usePlayer = create<PlayerState>((set, get) => {
   /**
    * Loads whatever the queue now points at and preloads what follows.
    *
-   * `crossfade` is only true for a natural track end. Crossfading a manual skip
-   * would make the button feel laggy — the user asked for the next track *now*.
+   * Ended transitions are ordinary loads; overlap is scheduled before the end.
    */
-  async function activate(queue: QueueState, restart: boolean, crossfade = false): Promise<void> {
+  async function activate(queue: QueueState, restart: boolean, autoplay = true): Promise<void> {
     const id = currentTrackId(queue)
     if (id == null || !engine) return
+    set({ error: null })
 
     if (restart) {
       engine.seek(0)
-      await engine.play()
-    } else if (crossfade && get().crossfadeSec > 0) {
-      await engine.crossfadeTo(id)
+      if (autoplay) await engine.play()
     } else {
-      await engine.load(id, true)
+      await engine.load(id, autoplay)
     }
-    engine.preload(peekNext(queue))
-    set({ current: get().known.get(id) ?? null, error: null })
+    preloadNext()
+    set({ current: get().known.get(id) ?? null })
   }
 
   return {
@@ -129,7 +182,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
     init() {
       if (engine) return
       engine = new AudioEngine({
-        onTimeUpdate: (position, duration) => set({ position, duration }),
+        onTimeUpdate: (position, duration) => {
+          set({ position, duration })
+          void maybeCrossfade(position, duration)
+        },
         onEnded: () => {
           // The sleep timer's "end of track" mode stops here rather than
           // advancing, which is the whole point of that mode.
@@ -165,6 +221,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     async playTracks(tracks, startIndex) {
       if (tracks.length === 0) return
       get().init()
+      invalidateTransition()
       const known = remember(tracks)
       const queue = qSetQueue(
         tracks.map((t) => t.id),
@@ -178,16 +235,20 @@ export const usePlayer = create<PlayerState>((set, get) => {
     async toggle() {
       get().init()
       if (!get().current) return
+      invalidateTransition()
       await engine!.toggle()
+      preloadNext()
     },
 
     stop() {
+      invalidateTransition()
       engine?.stop()
       set({ position: 0 })
       get().persistSession()
     },
 
     setCrossfade(seconds) {
+      invalidateTransition()
       engine?.setCrossfade(seconds)
       set({ crossfadeSec: seconds })
     },
@@ -197,6 +258,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     setSleepEndOfTrack() {
+      invalidateTransition()
       set({ sleep: startEndOfTrack() })
     },
 
@@ -212,43 +274,54 @@ export const usePlayer = create<PlayerState>((set, get) => {
      * restored, not resumed.
      */
     async restoreSession() {
-      if (get().sessionRestored) return
-      set({ sessionRestored: true })
+      if (get().sessionRestored || restoringSession) return
+      restoringSession = true
 
-      const settings = await window.resonance.settings.getAll()
-      get().init()
-      engine?.setVolume(settings.volume ?? 1)
-      engine?.setMuted(settings.muted ?? false)
-      engine?.setCrossfade(settings.crossfadeSec ?? 0)
-      set({
-        volume: settings.volume ?? 1,
-        muted: settings.muted ?? false,
-        crossfadeSec: settings.crossfadeSec ?? 0
-      })
+      try {
+        const settings = await window.resonance.settings.getAll()
+        get().init()
+        engine?.setVolume(settings.volume ?? 1)
+        engine?.setMuted(settings.muted ?? false)
+        engine?.setCrossfade(settings.crossfadeSec ?? 0)
+        set({
+          volume: settings.volume ?? 1,
+          muted: settings.muted ?? false,
+          crossfadeSec: settings.crossfadeSec ?? 0
+        })
 
-      const session = settings.session
-      if (!session || session.queue.length === 0) return
+        const session = settings.session
+        if (!session || session.queue.length === 0) {
+          set({ sessionRestored: true })
+          return
+        }
 
-      // Tracks may have been removed from the library since the session was
-      // saved, so the queue is rebuilt from what still exists.
-      const all = await window.resonance.library.getTracks()
-      const byId = new Map(all.map((t) => [t.id, t]))
-      const tracks = session.queue.map((id) => byId.get(id)).filter((t): t is Track => !!t)
-      if (tracks.length === 0) return
+        // Tracks may have been removed from the library since the session was
+        // saved, so the queue is rebuilt from what still exists.
+        const all = await window.resonance.library.getTracks()
+        const byId = new Map(all.map((t) => [t.id, t]))
+        const tracks = session.queue.map((id) => byId.get(id)).filter((t): t is Track => !!t)
+        if (tracks.length === 0) {
+          set({ sessionRestored: true })
+          return
+        }
 
-      const index = Math.min(Math.max(0, session.index), tracks.length - 1)
-      const known = remember(tracks)
-      let queue = qSetQueue(tracks.map((t) => t.id), index, get().queue)
-      queue = { ...queue, repeat: session.repeat }
-      if (session.shuffle) queue = qSetShuffle(queue, true)
+        const index = Math.min(Math.max(0, session.index), tracks.length - 1)
+        const known = remember(tracks)
+        let queue = qSetQueue(tracks.map((t) => t.id), index, get().queue)
+        queue = { ...queue, repeat: session.repeat }
+        if (session.shuffle) queue = qSetShuffle(queue, true)
 
-      set({ known, queue, current: byId.get(tracks[index]!.id) ?? null })
+        set({ known, queue, current: byId.get(tracks[index]!.id) ?? null })
 
-      const id = currentTrackId(queue)
-      if (id != null && engine) {
-        await engine.load(id, false, session.positionSec)
-        set({ position: session.positionSec })
-        engine.preload(peekNext(queue))
+        const id = currentTrackId(queue)
+        if (id != null && engine) {
+          await engine.load(id, false, session.positionSec)
+          set({ position: session.positionSec })
+          preloadNext()
+        }
+        set({ sessionRestored: true })
+      } finally {
+        restoringSession = false
       }
     },
 
@@ -266,7 +339,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     async next(auto = false) {
-      const result = qNext(get().queue, auto)
+      if (auto && transitioning) { endedWhileTransitioning = true; return }
+      const result = auto ? nextTransition() : qNext(get().queue, false)
+      invalidateTransition()
       set({ queue: result.state, current: syncCurrent(result.state) })
 
       if (!result.playing) {
@@ -274,23 +349,28 @@ export const usePlayer = create<PlayerState>((set, get) => {
         engine?.seek(0)
         return
       }
-      await activate(result.state, result.restart, auto)
+      await activate(result.state, result.restart)
       get().persistSession()
     },
 
     async previous() {
+      invalidateTransition()
       const result = qPrevious(get().queue, get().position * 1000)
       set({ queue: result.state, current: syncCurrent(result.state) })
       await activate(result.state, result.restart)
     },
 
     seek(sec) {
+      invalidateTransition()
       engine?.seek(sec)
       set({ position: sec })
+      preloadNext()
     },
 
     seekFraction(f) {
+      invalidateTransition()
       engine?.seekFraction(f)
+      preloadNext()
     },
 
     setVolume(v) {
@@ -310,54 +390,75 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     toggleShuffle() {
+      invalidateTransition()
       const queue = qSetShuffle(get().queue, !get().queue.shuffle)
       set({ queue })
-      engine?.preload(peekNext(queue))
+      preloadNext()
     },
 
     cycleRepeat() {
+      invalidateTransition()
       const queue = qCycleRepeat(get().queue)
       set({ queue })
-      engine?.preload(peekNext(queue))
+      preloadNext()
     },
 
     setRepeat(mode) {
+      invalidateTransition()
       set({ queue: { ...get().queue, repeat: mode } })
+      preloadNext()
     },
 
     playNext(tracks) {
       if (tracks.length === 0) return
+      invalidateTransition()
       const known = remember(tracks)
       const queue = qPlayNext(get().queue, tracks.map((t) => t.id))
       set({ known, queue })
-      engine?.preload(peekNext(queue))
+      preloadNext()
     },
 
     addToQueue(tracks) {
       if (tracks.length === 0) return
+      invalidateTransition()
       const known = remember(tracks)
       const queue = qAdd(get().queue, tracks.map((t) => t.id))
       set({ known, queue })
-      engine?.preload(peekNext(queue))
+      preloadNext()
     },
 
     removeFromQueue(index) {
+      invalidateTransition()
+      const wasPlaying = get().playing
       const wasCurrent = index === get().queue.index
       const queue = qRemoveAt(get().queue, index)
       set({ queue, current: syncCurrent(queue) })
-      if (wasCurrent && currentTrackId(queue) != null) void activate(queue, false)
+      if (queue.items.length === 0) {
+        engine?.stop()
+        set({ playing: false, position: 0, duration: 0, buffered: [] })
+      } else if (wasCurrent) void activate(queue, false, wasPlaying)
+      else preloadNext()
+      get().persistSession()
     },
 
     moveInQueue(from, to) {
+      invalidateTransition()
       const queue = qMove(get().queue, from, to)
       set({ queue })
-      engine?.preload(peekNext(queue))
+      preloadNext()
     },
 
     async jumpTo(index) {
+      invalidateTransition()
       const queue = qJumpTo(get().queue, index)
       set({ queue, current: syncCurrent(queue) })
       await activate(queue, false)
+    },
+
+    refreshKnown(tracks) {
+      const known = remember(tracks)
+      const id = currentTrackId(get().queue)
+      set({ known, current: id == null ? null : known.get(id) ?? null })
     },
 
     clearError() {

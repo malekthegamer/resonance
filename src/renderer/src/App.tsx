@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   closestCenter,
+  getClientRect,
   DndContext,
   DragOverlay,
   KeyboardSensor,
@@ -90,6 +91,15 @@ const chipBesideCursor: Modifier = ({ activatorEvent, draggingNodeRect, transfor
 }
 
 const CHIP_TO_CURSOR: Modifier[] = [chipBesideCursor]
+// Virtual rows use translateY for their actual layout. dnd-kit's default
+// transform-agnostic measurement would collapse all of them onto row zero.
+const measureDragNode = (element: HTMLElement) => getClientRect(element, {
+  ignoreTransform: !element.hasAttribute('data-playlist-position')
+})
+const DRAG_MEASURING = {
+  draggable: { measure: measureDragNode },
+  droppable: { measure: measureDragNode }
+}
 
 export default function App(): React.JSX.Element {
   const [theme, setTheme] = useState<Theme>('dark')
@@ -103,6 +113,10 @@ export default function App(): React.JSX.Element {
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null)
   const [showVisualizer, setShowVisualizer] = useState(true)
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null)
+  // Virtualized rows can unmount while scrolling. Keep the captured occurrence
+  // and selection until the gesture ends instead of rereading the source row.
+  const activeDragRef = useRef<DragData | null>(null)
+  const [playlistReordering, setPlaylistReordering] = useState(false)
 
   const {
     tracks, view, focus, query, searchResults, sortKey, sortDir,
@@ -129,7 +143,8 @@ export default function App(): React.JSX.Element {
     playlists, openId: openPlaylistId, openTracks: playlistTracks, lastImport,
     open: openPlaylist, refresh: refreshPlaylists, addTracks: addToPlaylist,
     remove: removePlaylist, exportPlaylist,
-    importFiles, removeAt: removeFromPlaylist, clearImportNotice
+    importFiles, removeAt: removeFromPlaylist, clearImportNotice,
+    reorder: reorderPlaylist, refreshOpen, saving: playlistSaving
   } = usePlaylists()
 
   useEffect(() => {
@@ -141,8 +156,18 @@ export default function App(): React.JSX.Element {
       setTheme(s.theme)
       setShowVisualizer(s.showVisualizer ?? true)
     })
-    return window.resonance.library.onScanProgress(setScan)
-  }, [load, setScan, initPlayer, refreshPlaylists, hydrateEq])
+    const offProgress = window.resonance.library.onScanProgress(setScan)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const offChanged = window.resonance.library.onChanged(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        void Promise.all([load(), refreshOpen(), refreshPlaylists()]).then(() => {
+          usePlayer.getState().refreshKnown(useLibrary.getState().tracks)
+        }).catch((err: unknown) => setToast(err instanceof Error ? err.message : 'Could not refresh the library'))
+      }, 120)
+    })
+    return () => { offProgress(); offChanged(); if (timer) clearTimeout(timer) }
+  }, [load, setScan, initPlayer, refreshPlaylists, hydrateEq, refreshOpen])
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme
@@ -229,13 +254,30 @@ export default function App(): React.JSX.Element {
    * would land in whichever playlist happened to be nearest.
    */
   const collisionDetection = useCallback<CollisionDetection>((args) => {
-    const dragging = readDragData(args.active.data.current)?.type
+    const active = activeDragRef.current ?? readDragData(args.active.data.current)
+    const dragging = active?.type
     const reordering = dragging === 'queue-item'
+
+    if (active?.type === 'library-tracks' && active.playlistOrigin && args.pointerCoordinates) {
+      const { x, y } = args.pointerCoordinates
+      const rect = document.querySelector('[data-testid="track-scroll"]')?.getBoundingClientRect()
+      if (rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        const rows = args.droppableContainers.filter((c) => {
+          const drop = readDropData(c.data.current)
+          return drop?.type === 'playlist-entry' && drop.playlistId === active.playlistOrigin!.playlistId
+        })
+        // The overlay sits beside the cursor, so its rectangle is not the
+        // insertion point. Measure row proximity from the pointer itself.
+        return closestCenter({ ...args, droppableContainers: rows, collisionRect: {
+          left: x - 1, right: x + 1, top: y - 1, bottom: y + 1, width: 2, height: 2
+        } })
+      }
+    }
 
     const droppableContainers = args.droppableContainers.filter((c) => {
       const drop = readDropData(c.data.current)
       // A queue row can only ever land on another queue row.
-      return reordering ? drop?.type === 'queue-item' : drop !== null
+      return reordering ? drop?.type === 'queue-item' : drop !== null && drop.type !== 'playlist-entry'
     })
 
     const scoped = { ...args, droppableContainers }
@@ -250,6 +292,7 @@ export default function App(): React.JSX.Element {
   const onDragStart = useCallback(
     (e: DragStartEvent) => {
       const data = readDragData(e.active.data.current)
+      activeDragRef.current = data
       setActiveDrag(data)
       // Grabbing a row outside the selection makes it the selection, so what
       // travels with the pointer is always what is highlighted. Same rule as
@@ -261,38 +304,50 @@ export default function App(): React.JSX.Element {
 
   const onDragEnd = useCallback(
     async (e: DragEndEvent): Promise<void> => {
+      const capturedDrag = activeDragRef.current
+      activeDragRef.current = null
       setActiveDrag(null)
+      setPlaylistReordering(false)
       const action = resolveDrop(
-        readDragData(e.active.data.current),
+        capturedDrag ?? readDragData(e.active.data.current),
         readDropData(e.over?.data.current)
       )
       if (!action) return
+      try {
+        if (action.kind === 'reorder-playlist') {
+          if (searching || action.playlistId !== openPlaylistId) return
+          await reorderPlaylist(action.playlistId, action.from, action.to)
+          return
+        }
 
-      if (action.kind === 'reorder-queue') {
-        moveInQueue(action.from, action.to)
-        return
+        if (action.kind === 'reorder-queue') {
+          moveInQueue(action.from, action.to)
+          return
+        }
+
+        const n = action.trackIds.length
+        const noun = n === 1 ? 'track' : 'tracks'
+
+        if (action.kind === 'add-to-playlist') {
+          await addToPlaylist(action.playlistId, [...action.trackIds])
+          const name = playlists.find((p) => p.id === action.playlistId)?.name
+          setToast(`Added ${n} ${noun} to ${name ?? 'playlist'}`)
+          return
+        }
+
+        // add-to-queue. The queue holds whole tracks, not ids, and the drag only
+        // carries ids — so they are resolved against what is on screen, which is
+        // where the drag started.
+        const byId = new Map(visibleTracks.map((t) => [t.id, t]))
+        const list = action.trackIds.map((id) => byId.get(id)).filter((t): t is Track => Boolean(t))
+        if (list.length === 0) return
+        addToQueue(list)
+        setToast(`Added ${list.length} ${list.length === 1 ? 'track' : 'tracks'} to the queue`)
+      } catch (err) {
+        setToast(err instanceof Error ? err.message : 'The change could not be saved')
       }
-
-      const n = action.trackIds.length
-      const noun = n === 1 ? 'track' : 'tracks'
-
-      if (action.kind === 'add-to-playlist') {
-        await addToPlaylist(action.playlistId, [...action.trackIds])
-        const name = playlists.find((p) => p.id === action.playlistId)?.name
-        setToast(`Added ${n} ${noun} to ${name ?? 'playlist'}`)
-        return
-      }
-
-      // add-to-queue. The queue holds whole tracks, not ids, and the drag only
-      // carries ids — so they are resolved against what is on screen, which is
-      // where the drag started.
-      const byId = new Map(visibleTracks.map((t) => [t.id, t]))
-      const list = action.trackIds.map((id) => byId.get(id)).filter((t): t is Track => Boolean(t))
-      if (list.length === 0) return
-      addToQueue(list)
-      setToast(`Added ${list.length} ${list.length === 1 ? 'track' : 'tracks'} to the queue`)
     },
-    [moveInQueue, addToPlaylist, playlists, visibleTracks, addToQueue]
+    [moveInQueue, addToPlaylist, playlists, visibleTracks, addToQueue, reorderPlaylist, searching, openPlaylistId]
   )
 
   /**
@@ -352,17 +407,19 @@ export default function App(): React.JSX.Element {
       { separator: true, label: '' },
       {
         label: `Add to playlist${suffix}`,
+        disabled: playlistSaving,
         submenu: playlists.map((pl) => ({
           label: pl.name,
-          onSelect: () => void addToPlaylist(pl.id, ids)
+          onSelect: () => void addToPlaylist(pl.id, ids).catch((err: Error) => setToast(err.message))
         }))
       },
-      ...(openPlaylistId != null
+      ...(openPlaylistId != null && !searching
         ? [
             {
               label: `Remove from this playlist${suffix}`,
               danger: true,
-              onSelect: () => void removeSelectedFromPlaylist(targets, list)
+              disabled: playlistSaving,
+              onSelect: () => void removeSelectedFromPlaylist(targets, list, index).catch((err: Error) => setToast(err.message))
             } as MenuItem
           ]
         : []),
@@ -386,11 +443,11 @@ export default function App(): React.JSX.Element {
    * Removing by ascending position would shift the later entries out from under
    * each subsequent removal.
    */
-  async function removeSelectedFromPlaylist(targets: Track[], list: Track[]): Promise<void> {
-    const positions = targets
-      .map((t) => list.findIndex((x) => x.id === t.id))
-      .filter((i) => i >= 0)
-      .sort((a, b) => b - a)
+  async function removeSelectedFromPlaylist(targets: Track[], list: Track[], clickedIndex: number): Promise<void> {
+    const ids = new Set(targets.map((t) => t.id))
+    const positions = targets.length === 1
+      ? [clickedIndex]
+      : list.map((t, i) => ids.has(t.id) ? i : -1).filter((i) => i >= 0).sort((a, b) => b - a)
     for (const position of positions) await removeFromPlaylist(position)
     clearSelection()
   }
@@ -427,6 +484,7 @@ export default function App(): React.JSX.Element {
       {
         label: 'Delete playlist',
         danger: true,
+        disabled: playlistSaving,
         onSelect: () => setConfirmDelete({ id, name })
       }
     ]
@@ -493,6 +551,7 @@ export default function App(): React.JSX.Element {
       <TitleBar />
 
       <DndContext
+        measuring={DRAG_MEASURING}
         sensors={sensors}
         collisionDetection={collisionDetection}
         // Queue rows are pinned to their column while reordering. Library rows
@@ -501,7 +560,8 @@ export default function App(): React.JSX.Element {
         modifiers={activeDrag?.type === 'queue-item' ? VERTICAL_ONLY : NO_MODIFIERS}
         onDragStart={onDragStart}
         onDragEnd={(e) => void onDragEnd(e)}
-        onDragCancel={() => setActiveDrag(null)}
+        onDragOver={(e) => setPlaylistReordering(readDropData(e.over?.data.current)?.type === 'playlist-entry')}
+        onDragCancel={() => { activeDragRef.current = null; setActiveDrag(null); setPlaylistReordering(false) }}
       >
       <div className={styles.body}>
         <Sidebar
@@ -560,6 +620,9 @@ export default function App(): React.JSX.Element {
           ) : (
             <TrackTable
               tracks={visibleTracks}
+              playlistId={!searching && openPlaylistId != null ? openPlaylistId : undefined}
+              saving={playlistSaving}
+              activeDrag={activeDrag}
               showArt={!focus || focus.kind !== 'album'}
               onPlay={play}
               currentTrackId={currentTrack?.id ?? null}
@@ -616,7 +679,7 @@ export default function App(): React.JSX.Element {
         >
           {activeDrag?.type === 'library-tracks' ? (
             <div className={styles.dragChip} data-testid="drag-chip">
-              {dragLabel(activeDrag.trackIds, (id) => titleById.get(id))}
+              {dragLabel(playlistReordering ? [activeDrag.originId] : activeDrag.trackIds, (id) => titleById.get(id))}
             </div>
           ) : null}
         </DragOverlay>

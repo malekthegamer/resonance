@@ -4,7 +4,7 @@ import { IPC } from '@shared/ipc'
 import type { ScanProgress } from '@shared/types'
 import { getDb } from '../db/open'
 import { getTrackById } from '../db/tracks'
-import { isScanning, scanFolders } from '../scan/controller'
+import { scanFolders } from '../scan/controller'
 import {
   knownPaths,
   readTags,
@@ -85,7 +85,7 @@ export function registerTagIpc(): void {
        * already known to work.
        */
       let rescan: ScanProgress | null = null
-      if (written.length > 0 && !isScanning()) {
+      if (written.length > 0) {
         try {
           rescan = await scanFolders(written, { onProgress: broadcast })
         } catch {

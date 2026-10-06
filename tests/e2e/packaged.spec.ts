@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { ensureFixtures, FIXTURE_DIR } from '../fixtures/gen-audio'
@@ -28,9 +29,15 @@ const VERSION = JSON.parse(
 const UNPACKED = resolve(process.cwd(), 'release', 'win-unpacked', 'Resonance.exe')
 const INSTALLER = resolve(process.cwd(), 'release', `Resonance-${VERSION}-x64.exe`)
 const PORTABLE = resolve(process.cwd(), 'release', `Resonance-${VERSION}-portable.exe`)
+const REQUIRE_PACKAGED = process.env['RESONANCE_REQUIRE_PACKAGED'] === '1'
 
 test.describe('packaged build', () => {
-  test.skip(!existsSync(UNPACKED), 'run `npm run dist` first')
+  test.skip(!REQUIRE_PACKAGED && !existsSync(UNPACKED), 'run `npm run dist` first')
+  test.beforeAll(() => {
+    if (REQUIRE_PACKAGED) {
+      for (const file of [UNPACKED, INSTALLER, PORTABLE]) expect(existsSync(file), `Required packaged artifact: ${file}`).toBe(true)
+    }
+  })
 
   test('produces an installer and a portable build', () => {
     for (const [label, path] of [
@@ -42,11 +49,17 @@ test.describe('packaged build', () => {
       // eslint-disable-next-line no-console
       console.log(`${label!.padEnd(10)} ${mb.toFixed(1)} MB  ${path}`)
       expect(mb).toBeGreaterThan(40)
+      const productVersion = execFileSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        '[System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:RESONANCE_TEST_ARTIFACT).ProductVersion'
+      ], { env: { ...process.env, RESONANCE_TEST_ARTIFACT: path }, encoding: 'utf8', windowsHide: true }).trim()
+      expect([VERSION, `${VERSION}.0`], `${label} version: ${productVersion}`).toContain(productVersion)
     }
   })
 
   test('the packaged app launches, opens its window and reaches its database', async () => {
     const env = { ...process.env }
+    env['RESONANCE_DISABLE_UPDATER'] = '1'
     delete env['ELECTRON_RUN_AS_NODE']
 
     const app = await electron.launch({

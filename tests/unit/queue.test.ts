@@ -27,6 +27,26 @@ function seededRng(seed = 42): () => number {
 
 const IDS = [10, 20, 30, 40, 50]
 
+describe('duplicate occurrence identity', () => {
+  it('keeps the second occurrence current when another row moves', () => {
+    const queue = setQueue([10, 20, 10, 30], 2)
+    const moved = move(queue, 3, 0)
+    expect(moved.items).toEqual([30, 10, 20, 10])
+    expect(moved.index).toBe(3)
+    expect(addToQueue(moved, [10]).index).toBe(3)
+    expect(playNext(moved, [20]).index).toBe(3)
+  })
+  it('maps shuffle positions to the same occurrences after moving and deleting', () => {
+    const queue = { ...setQueue([10, 20, 10, 30], 2), shuffle: true, order: [2, 3, 0, 1], orderPos: 0 }
+    const moved = move(queue, 3, 0)
+    expect(moved.order).toEqual([3, 0, 1, 2])
+    expect(moved.index).toBe(3)
+    const removed = removeAt(moved, 1)
+    expect(removed.order).toEqual([2, 0, 1])
+    expect(removed.index).toBe(2)
+  })
+})
+
 describe('setQueue', () => {
   it('starts at the requested index', () => {
     expect(currentTrackId(setQueue(IDS, 2))).toBe(30)

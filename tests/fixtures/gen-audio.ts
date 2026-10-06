@@ -66,7 +66,7 @@ function run(args: string[]): void {
  * Pure JS on purpose: WAV needs no encoder, and the large fixture must not be
  * built in memory — 112 MB of Int16 would be a needless allocation spike.
  */
-export function writeWav(path: string, seconds: number): void {
+export function writeWav(path: string, seconds: number, frequencyHz = FREQ_HZ): void {
   const dataBytes = SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * seconds
   const fd = openSync(path, 'w')
   try {
@@ -95,7 +95,7 @@ export function writeWav(path: string, seconds: number): void {
       const frames = Math.min(framesPerChunk, totalFrames - frame)
       for (let i = 0; i < frames; i++) {
         const sample = Math.round(
-          Math.sin((2 * Math.PI * FREQ_HZ * (frame + i)) / SAMPLE_RATE) * AMPLITUDE * 32767
+          Math.sin((2 * Math.PI * frequencyHz * (frame + i)) / SAMPLE_RATE) * AMPLITUDE * 32767
         )
         const off = i * CHANNELS * BYTES_PER_SAMPLE
         chunk.writeInt16LE(sample, off)

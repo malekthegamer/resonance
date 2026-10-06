@@ -23,7 +23,7 @@ function broadcast(progress: ScanProgress): void {
   }
 }
 
-export function registerLibraryIpc(): void {
+export function registerLibraryIpc(onFoldersAdded: () => void): void {
   ipcMain.handle(IPC.LIB_PICK_AND_SCAN, async (e): Promise<ScanProgress | null> => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const result = await dialog.showOpenDialog(win!, {
@@ -37,6 +37,7 @@ export function registerLibraryIpc(): void {
     for (const folder of result.filePaths) {
       db.run('INSERT OR IGNORE INTO watched_folders (path, added_at) VALUES (?, ?)', [folder, now])
     }
+    onFoldersAdded()
 
     return scanFolders(result.filePaths, { onProgress: broadcast })
   })

@@ -92,6 +92,15 @@ when the context is suspended and ramps when it is running. `setTargetAtTime`
 only advances with the context clock, so EQ and volume changes made while
 nothing was playing used to be silently discarded.
 
+**Automatic crossfade begins before the song ends.** Position updates request
+one guarded transition from the player store. The exact next queue result is
+shared by preload and advancement, including shuffle at repeat-all wraparound.
+The queue advances only after the incoming deck starts successfully. Overlap is
+limited to remaining outgoing audio and half of either duration; repeat-one,
+end-of-track sleep and an exhausted queue use ordinary advancement. The outgoing
+deck stays reserved until its token-guarded ramp completes, then the following
+song can preload. Pause/seek retain the incoming song; skip/stop cancel overlap.
+
 ### Queue state machine (`renderer/src/core/queue.ts`)
 
 Pure, no React, no audio — because this is where playback bugs live. Shuffle is
@@ -100,6 +109,11 @@ track plays once before repeating. `next(state, auto)` distinguishes a track
 ending naturally from the user pressing next: under repeat-one the former
 restarts and the latter escapes. Unit-tested exhaustively across every
 shuffle x repeat x end-of-list combination.
+
+Queue edits remap occurrence positions, preserving the current duplicate and
+the existing shuffle order. Removing the current item preserves paused status;
+removing the last item stops both decks and immediately saves an empty session.
+Periodic saving begins only after session restoration has completed.
 
 ---
 
@@ -125,6 +139,16 @@ rows would need reconciling every time, and stale orphans after a re-tag are how
 `(playlist_id, position)` is the primary key, so an incremental shuffle collides
 with itself partway through a reorder.
 
+The unfiltered playlist table uses `(playlist id, occurrence position)` for
+React, virtualizer and drag identities. One shared drag context routes internal
+row drops to `playlists.reorder(id, from, to)` and external drops to the selected
+tracks. Internal movement always moves the grabbed occurrence alone. Drag
+measurements include the virtualizer's positioning transform, and captured
+payloads survive source-row unmounting during edge scrolling. Reordering is
+optimistic; membership edits are locked while saving, failures reload the
+authoritative order, and navigation tokens prevent late responses restoring an
+old view. An already playing queue is independent of playlist order.
+
 **FTS5** over title/artist/album, kept in sync by insert/update/delete triggers.
 Tests cover the trigger sync specifically, because a broken trigger leaves search
 silently stale while the library still looks correct.
@@ -149,8 +173,34 @@ dozens of `add` events — and waits for writes to settle so a file mid-copy is
 not parsed as truncated. New files go through the ordinary scanner so there is
 no second code path to drift.
 
+Manual scans, watcher additions/deletions and post-tag rescans share one FIFO
+queue. Watcher paths are deduplicated while waiting, and newly picked folders
+join the watcher immediately. Each job checks for vanished files when it starts.
+Cancellation settles once after worker termination, preserves committed batches
+and ignores late worker messages; shutdown cancels queued jobs too.
+
 **Deleted files are marked `available = 0`, never removed.** A temporarily
 disconnected drive must not destroy playlists and play counts.
+
+Unavailable tracks are excluded from the known-mtime cache, so even same-mtime
+restoration reparses them. Committed batches and deletions broadcast `LIB_CHANGED`
+through `library.onChanged(callback)`. The renderer refreshes library/search,
+open-playlist and cached player metadata without changing transport or order.
+
+## Tag originals and release verification
+
+A completed backup file, rather than a directory, proves backup creation.
+New copies go to unique temporary files, are checked with streaming SHA-256,
+then published through an exclusive atomic hard link. Existing regular,
+nonempty legacy originals remain immutable. Suspicious finals fail closed;
+failed copies prevent tag writes and leave retries possible at the same paths.
+
+The release workflow runs ordinary desktop tests before packaging, then requires
+the unpacked app, installer and portable artifacts and runs the packaged suite
+before publishing. Artifact product versions and the running app version must
+match package.json. Test launches disable updates and use isolated user data;
+failure diagnostics are retained. These implementation changes require no
+database migration or additional dependency.
 
 ---
 

@@ -1,8 +1,6 @@
 import { extname } from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { EXTENSION_FORMATS } from '@shared/types'
-import { getDb } from '../db/open'
-import { markUnavailable } from '../db/tracks'
 
 /**
  * Live folder watching.
@@ -22,9 +20,11 @@ let watcher: FSWatcher | null = null
 let pendingAdds = new Set<string>()
 let pendingRemovals = new Set<string>()
 let flushTimer: NodeJS.Timeout | null = null
+let generation = 0
+let flushing = false
 
 export interface WatcherCallbacks {
-  onChanged(addedPaths: string[]): void | Promise<void>
+  onChanged(paths: string[]): void | Promise<void>
 }
 
 function isAudio(path: string): boolean {
@@ -33,25 +33,34 @@ function isAudio(path: string): boolean {
 
 function scheduleFlush(cb: WatcherCallbacks): void {
   if (flushTimer) clearTimeout(flushTimer)
-  flushTimer = setTimeout(() => {
-    const added = [...pendingAdds]
-    const removed = [...pendingRemovals]
-    pendingAdds = new Set()
-    pendingRemovals = new Set()
+  const token = generation
+  flushTimer = setTimeout(async () => {
+    flushTimer = null
+    if (flushing) return // pending paths stay collected until the current job finishes
+    flushing = true
+    try {
+      const added = [...pendingAdds]
+      const removed = [...pendingRemovals]
+      pendingAdds = new Set()
+      pendingRemovals = new Set()
 
-    if (removed.length) {
-      try {
-        markUnavailable(getDb(), removed)
-      } catch {
-        /* database may be closing during shutdown */
+      // Deletions join the same scan queue as additions. Existence is checked
+      // when that job begins, so restoration while waiting wins over an old unlink.
+      const paths = [...added, ...removed]
+      if (paths.length) await cb.onChanged(paths)
+    } catch (err) {
+      console.warn('[watch] update failed', err)
+    } finally {
+      if (token === generation) {
+        flushing = false
+        if (pendingAdds.size || pendingRemovals.size) scheduleFlush(cb)
       }
     }
-    if (added.length) void cb.onChanged(added)
   }, FLUSH_DEBOUNCE_MS)
 }
 
 export function startWatching(folders: string[], cb: WatcherCallbacks): void {
-  stopWatching()
+  if (watcher) { watcher.add(folders); return }
   if (folders.length === 0) return
 
   watcher = chokidar.watch(folders, {
@@ -66,12 +75,14 @@ export function startWatching(folders: string[], cb: WatcherCallbacks): void {
   watcher.on('add', (path: string) => {
     if (!isAudio(path)) return
     pendingAdds.add(path)
+    pendingRemovals.delete(path)
     scheduleFlush(cb)
   })
 
   watcher.on('unlink', (path: string) => {
     if (!isAudio(path)) return
     pendingRemovals.add(path)
+    pendingAdds.delete(path)
     scheduleFlush(cb)
   })
 
@@ -80,6 +91,7 @@ export function startWatching(folders: string[], cb: WatcherCallbacks): void {
     // cheap when nothing actually changed.
     if (!isAudio(path)) return
     pendingAdds.add(path)
+    pendingRemovals.delete(path)
     scheduleFlush(cb)
   })
 
@@ -89,6 +101,8 @@ export function startWatching(folders: string[], cb: WatcherCallbacks): void {
 }
 
 export function stopWatching(): void {
+  generation++
+  flushing = false
   if (flushTimer) {
     clearTimeout(flushTimer)
     flushTimer = null
