@@ -1,7 +1,7 @@
 # Status
 
-Version **0.3.0** adds reliability fixes and playlist row reordering, prepared
-for publication through the tested release pipeline. The previous release is 0.2.0.
+Released **0.3.0** on **2026-10-07** with reliability fixes and playlist row
+reordering. The previous release is 0.2.0.
 
 0.2.0 added track selection, drag-to-playlist, and the tag editor (write core
 plus dialog). Released via the tagged Actions pipeline; auto-update offered from
@@ -14,6 +14,12 @@ packaged-app checks pass against freshly built installer/portable artifacts.
 The full desktop run covered 132 passing checks; the final global-search boundary
 check passed separately after its addition. Tests used generated/disposable music,
 isolated user data and disabled updates. These checks preceded release preparation.
+
+The [v0.3.0 release pipeline](https://github.com/malekthegamer/resonance/actions/runs/37536116174)
+passed on GitHub: type checking, unit tests, all 133 ordinary desktop checks
+(one optional personal-library import skipped), installer/portable packaging and
+both mandatory packaged-app checks. The [published release](https://github.com/malekthegamer/resonance/releases/tag/v0.3.0)
+includes both Windows binaries and `latest.yml` for update discovery.
 
 Everything in the original spec is built except smart playlists, which were cut
 deliberately. What follows is what is *not* done, what is known-broken, and what
